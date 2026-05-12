@@ -890,25 +890,97 @@ footer a { color: #2563eb; text-decoration: none; }
         <input type="hidden" id="pc-denoise-mink"   value="0">
         <input type="hidden" id="pc-denoise-radius" value="0">
         <input type="hidden" id="pc-denoise-smooth" value="0">
-        <!-- Holdouts -->
-        <input type="hidden" id="pc-shade" value="0">
-        <input type="hidden" id="obj-mask-radius" value="30">
-        <input type="hidden" id="obj-cloud-size" value="14">
-        <input type="hidden" id="obj-cloud-trail-opacity" value="0.95">
-        <input type="hidden" id="obj-cloud-trail-count" value="256">
-        <input type="hidden" id="obj-cloud-trail-len" value="20">
-        <input type="hidden" id="obj-cloud-trail-col" value="#34d399">
-        <input type="hidden" id="obj-cloud-trail-col-old" value="#ffffff">
-        <input type="hidden" id="obj-cloud-trail-mixlo" value="0.18">
-        <input type="hidden" id="obj-cloud-trail-exp" value="1">
-        <input type="hidden" id="obj-cloud-trail-width" value="0.9">
-        <input type="hidden" id="obj-cloud-trail-boost" value="1.0">
-        <input type="hidden" id="motion-min" value="0">
-        <input type="hidden" id="ghost-frames" value="42">
-        <input type="hidden" id="ghost-opacity" value="0.30">
-        <input type="hidden" id="obj-R" value="0.10">
-        <input type="hidden" id="obj-K" value="4">
-        <input type="hidden" id="obj-dot" value="2.5">
+        <!-- Holdouts: only the truly-orthogonal Point-cloud knobs that
+             aren't HOT3D-specific stay hidden. The HOT3D object-cloud /
+             trails / ghosts / motion-min UI is now in its own dataset-
+             gated section below (id="sb-hot3d"). -->
+        <input type="hidden" id="pc-shade"  value="0">
+        <input type="hidden" id="obj-R"     value="0.10">
+        <input type="hidden" id="obj-K"     value="4">
+        <input type="hidden" id="obj-dot"   value="2.5">
+      </div>
+    </details>
+
+    <!-- ──────────── HOT3D-only sidebar section ────────────────────
+         Hidden by default; applyDatasetDefaults() un-hides it when the
+         loaded clip is detected as HOT3D. Houses the per-clip GT
+         object cloud + trails + ghost-frame controls that motion-
+         teaser-viz ships. Every id mirrors motion-teaser-viz so the
+         existing JS wiring (wireSlider / getElementById('t-...'))
+         just works without modification. -->
+    <details class="sb-section" id="sb-hot3d" style="display:none;" open>
+      <summary>
+        <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> HOT3D
+        <span class="summary-tag">object cloud · trails · ghosts</span>
+      </summary>
+      <div class="sb-body-inner">
+        <div class="toggle-grid" style="margin-bottom:8px;">
+          <button class="btn full" id="t-object-cloud" title="Render gt_3d at the playhead as a colored Points cloud using pt_colors_rgb (HOT3D mode).">object cloud</button>
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="Disc size (CSS pixels) for the object cloud points.">Object cloud size</span><span class="v" id="obj-cloud-size-lbl">14.0</span></div>
+          <input type="range" id="obj-cloud-size" min="2" max="40" step="0.5" value="14">
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="HOT3D-only: drop scene-PC points whose nearest anchor-frame 2D-track is closer than this many pixels (so MoGe-lifted object pixels disappear and only the GT object cloud represents the foreground).">Object mask radius (px)</span><span class="v" id="obj-mask-radius-lbl">30 px</span></div>
+          <input type="range" id="obj-mask-radius" min="0" max="200" step="1" value="30">
+        </div>
+        <div class="toggle-grid" style="margin-top:6px;">
+          <button class="btn full on" id="t-object-cloud-trails" title="Per-track trail polylines for the object cloud, vertex-coloured pale→vivid by time.">object cloud trails</button>
+          <button class="btn full" id="t-object-cloud-trail-honor-vis" title="OFF (default): trail uses GT mesh-pose positions through occluded frames so the polyline stays smooth across visibility gaps. ON: trail breaks at frames where the track is occluded (visible-only look).">trail honors visibility</button>
+          <button class="btn full on" id="t-prediction-mode" title="ON (default): frame 0 of the moving object is drawn SOLID as the 'known input', every ghost frame and the playhead are drawn at ghost-opacity (the 'predicted future'), and the trail spans frame 0 → playhead regardless of trail-length. OFF: legacy — playhead is solid, ghost frames are ghost.">prediction mode</button>
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="Number of object-cloud tracks to draw a trail polyline for. Drag up to the per-object track count to render every track of the moving object.">Trail # tracks</span><span class="v" id="obj-cloud-trail-count-lbl">256</span></div>
+          <input type="range" id="obj-cloud-trail-count" min="0" max="6000" step="1" value="256">
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="Number of past frames each trail extends back from the current playhead.">Trail length (frames)</span><span class="v" id="obj-cloud-trail-len-lbl">20</span></div>
+          <input type="range" id="obj-cloud-trail-len" min="2" max="106" step="1" value="20">
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="Object-cloud trail polyline opacity. High = trails occlude any ghost-cloud dots that fall behind them; low = trails recede as faint motion cues and ghosts bleed through.">Trail opacity</span><span class="v" id="obj-cloud-trail-opacity-lbl">0.95</span></div>
+          <input type="range" id="obj-cloud-trail-opacity" min="0" max="1" step="0.02" value="0.95">
+        </div>
+        <div class="color-row">
+          <input type="color" id="obj-cloud-trail-col" value="#34d399" title="Trail colour at the NEWEST end of the gradient (the playhead-side end of the trail).">
+          <span class="cn">Trail colour (newest)</span>
+        </div>
+        <div class="color-row">
+          <input type="color" id="obj-cloud-trail-col-old" value="#ffffff" title="Trail colour at the OLDEST end of the gradient (the far-back end of the trail).">
+          <span class="cn">Trail colour (oldest)</span>
+        </div>
+        <div class="fld-grid">
+          <div class="fld">
+            <div class="lbl-row"><span title="Trail-gradient floor. 0 = trail starts at the oldest colour at frame 0; higher values bias the whole trail toward the newest colour.">Trail gradient floor</span><span class="v" id="obj-cloud-trail-mixlo-lbl">0.18</span></div>
+            <input type="range" id="obj-cloud-trail-mixlo" min="0" max="0.95" step="0.02" value="0.18">
+          </div>
+          <div class="fld">
+            <div class="lbl-row"><span title="Trail-gradient curve exponent. <1 boosts the bright (newest) end; >1 stretches the pale (oldest) end.">Trail gradient curve</span><span class="v" id="obj-cloud-trail-exp-lbl">1.00</span></div>
+            <input type="range" id="obj-cloud-trail-exp" min="0.2" max="3" step="0.05" value="1">
+          </div>
+          <div class="fld">
+            <div class="lbl-row"><span title="Pixel width of the object-cloud trail polylines. Lower = thinner streaks so the cloud dominates.">Trail line width</span><span class="v" id="obj-cloud-trail-width-lbl">0.9</span></div>
+            <input type="range" id="obj-cloud-trail-width" min="0.3" max="8" step="0.1" value="0.9">
+          </div>
+          <div class="fld">
+            <div class="lbl-row"><span title="Multiplier on every RGB channel of the trail's gradient end-points before rendering. >1 saturates / brightens; <1 dims toward black.">Trail colour boost</span><span class="v" id="obj-cloud-trail-boost-lbl">1.00</span></div>
+            <input type="range" id="obj-cloud-trail-boost" min="0.3" max="2.5" step="0.05" value="1.00">
+          </div>
+        </div>
+        <div class="fld" style="margin-top:6px;">
+          <div class="lbl-row"><span title="Hide tracks whose total motion (bbox diagonal across all frames) is below this threshold. Set above the static-object jitter floor (~0.005 m) to surface only the moving object's tracks.">Min track motion (m)</span><span class="v" id="motion-min-lbl">0.000</span></div>
+          <input type="range" id="motion-min" min="0" max="0.5" step="0.001" value="0">
+        </div>
+        <div class="fld" style="margin-top:6px;">
+          <div class="lbl-row"><span title="Comma-separated frame indices to render the moving object cloud at as transparent ghosts. In prediction mode, frame 0 is always solid and is auto-excluded — leave '42' here to ghost the mid-clip pose, or add more frames like '42, 80'.">Ghost frames</span></div>
+          <input type="text" id="ghost-frames" value="42"
+                 style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:.7rem;">
+        </div>
+        <div class="fld">
+          <div class="lbl-row"><span title="Per-ghost cloud opacity. 0 = invisible, 1 = same as live cloud.">Ghost opacity</span><span class="v" id="ghost-opacity-lbl">0.30</span></div>
+          <input type="range" id="ghost-opacity" min="0" max="1" step="0.02" value="0.30">
+        </div>
       </div>
     </details>
 
@@ -3209,6 +3281,15 @@ class Panel {
   _buildTrailLayer(pts3d, fStart, fEndExclusive, ptIdx, mat, baseColor,
                    useGradient = true, mixLoOverride = null, T_total = null,
                    role = null) {
+    // Null-pts3d guard: some bundles ship cfg.gt_3d or cfg.pred_3d as
+    // null (HOT3D in particular has gt_3d in a side-loaded binary and
+    // pred_3d simply absent). The caller passes those slots through
+    // unchanged; without this early-out the next line —
+    //   if (fi < 0 || fi >= pts3d.length) continue;
+    // — throws on null.length and aborts updateDynamic mid-frame,
+    // which prevents the object cloud / markers / object-trails code
+    // (downstream of this call) from ever running.
+    if (!pts3d) return null;
     const segs = [];
     const cols = [];
     // Two-color gradient: oldEnd (pale / oldest frame) → newEnd (vivid /
@@ -3315,6 +3396,8 @@ class Panel {
   _addTrailBallsLayer(pts3d, fStart, fEndExclusive, ptIdx, baseColor,
                      useGradient, mixLoOverride, rMin, rMax,
                      T_total = null, stride = null, role = null) {
+    if (!pts3d) return;     // see comment in _buildTrailLayer — same
+                            // null-guard for HOT3D's missing pred_3d.
     if (stride == null) stride = Math.max(1, Settings.ballStride | 0);
     const isPaperGrad = mixLoOverride !== null;
     const MIX_LO = useGradient ? (mixLoOverride ?? Settings.mixLo) : 0.92;
@@ -3871,6 +3954,45 @@ class Panel {
           cfg.pred_3d, 0, trailEnd, idx,
           this.lineBaseCols.pred, true, paperMix,
           rMin, rMax, T_TOTAL, null, 'pred');
+      }
+    }
+    // HOT3D motion5 overlay (gated by cfg._m5 — set in init() when the
+    // bundle ships `m5_trails`). GT comes from gt3d.bin; pred is built
+    // by applying motion5's per-frame rigid motion to all ~2000 query
+    // points so the trail covers the whole object. We sub-sample via
+    // the picker's _goodIdx (same as the regular GT/Pred path).
+    if (cfg._m5) {
+      const m5 = cfg._m5;
+      const T_m5 = m5.pred_3d?.length || 0;
+      if (T_m5 > 0) {
+        const trailEndM5 = isPaper ? T_m5 : Math.min(lastFi + 1, T_m5);
+        const idxM5 = idx;
+        if (this.opts.showPred && m5.pred_3d) {
+          const layer = this._buildTrailLayer(
+            m5.pred_3d, 0, trailEndM5, idxM5,
+            this.lineMats.pred, this.lineBaseCols.pred,
+            true, paperMix, T_m5, 'pred');
+          if (layer) this.dynGroup.add(layer);
+          if (this.opts.showBalls) {
+            this._addTrailBallsLayer(
+              m5.pred_3d, 0, trailEndM5, idxM5,
+              this.lineBaseCols.pred, true, paperMix,
+              rMin, rMax, T_m5, null, 'pred');
+          }
+        }
+        if (this.opts.showGT && m5.gt_3d) {
+          const layer = this._buildTrailLayer(
+            m5.gt_3d, 0, trailEndM5, idxM5,
+            this.lineMats.gt, this.lineBaseCols.gt,
+            true, paperMix, T_m5, 'gt');
+          if (layer) this.dynGroup.add(layer);
+          if (this.opts.showBalls) {
+            this._addTrailBallsLayer(
+              m5.gt_3d, 0, trailEndM5, idxM5,
+              this.lineBaseCols.gt, true, paperMix,
+              rMin, rMax, T_m5, null, 'gt');
+          }
+        }
       }
     }
     // Start markers (only — we no longer emit end-of-trajectory spheres
@@ -4863,6 +4985,13 @@ function detectDatasetFromUrl(url) {
 
 function applyDatasetDefaults(clipUrl) {
   const dataset = detectDatasetFromUrl(clipUrl);
+  // Show/hide dataset-gated sidebar sections. Currently only HOT3D has
+  // a dedicated section (object cloud + trails + ghost frames); other
+  // datasets keep the global sidebar layout.
+  {
+    const hot3dSection = document.getElementById('sb-hot3d');
+    if (hot3dSection) hot3dSection.style.display = (dataset === 'hot3d') ? '' : 'none';
+  }
   // Per-dataset preset map. Each entry's keys map onto Settings fields
   // (and the slider id is derived by transforming the key). Only listed
   // datasets get presets; everything else inherits the global defaults
@@ -5157,6 +5286,29 @@ async function init() {
     cfg.gt_2d = null;
     cfg.pred_2d = null;
     cfg.pt_colors_rgb = new Array(N_obj);   // sparse
+  }
+  // HOT3D motion5 prediction overlay. Bundle ships `m5_trails` with
+  // dense (per-mtv-query-point) GT + Pred 3-D arrays — pred is built
+  // by applying motion5's per-frame rigid object motion to all 2000
+  // query points so the trail covers the whole moving object. We
+  // stash it on cfg._m5; updateDynamic's m5 branch draws both GT and
+  // pred trails from these arrays when the bundle has it. Without
+  // this loader, cfg.pred_3d is null on HOT3D and the pred trail
+  // never appears.
+  if (clipData.m5_trails) {
+    const mt = clipData.m5_trails;
+    const N_m5 = (mt.gt_3d?.[0]?.length) || 0;
+    cfg._m5 = {
+      gt_3d:    mt.gt_3d,
+      pred_3d:  mt.pred_3d,
+      vis:      mt.vis,
+      n_hist:   mt.n_hist | 0,
+      hist_frames:   mt.hist_frames,
+      future_frames: mt.future_frames,
+      n_pts:    N_m5,
+    };
+    console.log(`m5_trails: T=${mt.gt_3d?.length || 0}  N=${N_m5}  ` +
+                `n_hist=${mt.n_hist}  align=${mt.alignment}`);
   }
   if (clipData.cam_bin?.url) {
     const cam = await loadCamBinary(clipData.cam_bin.url);
