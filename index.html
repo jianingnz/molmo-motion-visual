@@ -868,25 +868,28 @@ footer a { color: #2563eb; text-decoration: none; }
           <div class="lbl-row"><span title="Drops scene-PC points whose camera-frame Z (metres) exceeds this. HOT3D defaults to 0.85 m (tabletop divider). DROID defaults to 2.0 m (hides the back wall). Slide right to disable; slide left to peel the scene back.">Max scene depth (m)</span><span class="v" id="max-scene-depth-lbl">10.00 m</span></div>
           <input type="range" id="max-scene-depth" min="0.05" max="10.0" step="0.01" value="10">
         </div>
-        <!-- Denoise: radius-outlier + centroid-offset edge filter.
-             Algorithm in computePcDenoiseMask(). Both run in one
-             uniform-grid pass; result is cached on clipData. -->
+        <!-- Image-space depth-edge denoise. See _buildEdgeRaster() for the
+             full pipeline: rasterize depth → detect 4-neighbour depth
+             jumps + silhouettes → dilate edge mask by widthPx → drop
+             every PC point whose source pixel is in the mask. Click
+             "Show edges" to render { depth | raw edges | dilated edges }
+             side-by-side for the current clip + slider state. -->
         <div class="fld" style="margin-top:10px;">
-          <div class="lbl-row"><span title="Drop a scene-PC point if it has fewer than this many neighbours within the local radius. 0 = off. Kills isolated MoGe/depth-lift floaters.">Denoise: min neighbours</span><span class="v" id="pc-denoise-mink-lbl">4</span></div>
-          <input type="range" id="pc-denoise-mink" min="0" max="40" step="1" value="4">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Edge-removal strength. 0 = no filter. 1 = maximally aggressive (drops anything with even a small depth jump across its image-space neighbourhood). The viewer picks the backend automatically: for clips with frame-0 camera intrinsics (HOT3D / EgoDex / HD-EPIC) the slider drives an image-domain depth-edge detector (project each point back to (u,v); drop if its 2-D pixel neighbours straddle a relative depth jump > tol). For clips without intrinsics (DROID, DAVIS) it falls back to PCA surface-variation. Default 0.7.">Denoise: edge sensitivity</span><span class="v" id="pc-denoise-edge-lbl">0.70</span></div>
+          <div class="lbl-row"><span title="Sensitivity of the depth-jump test. 0 = no edge filter. 1 = a 1 % relative depth jump is enough to flag the pixel. Higher = more pixels classified as edges. Default 0.7.">Denoise: edge sensitivity</span><span class="v" id="pc-denoise-edge-lbl">0.70</span></div>
           <input type="range" id="pc-denoise-edge" min="0" max="1" step="0.02" value="0.70">
         </div>
         <div class="fld">
-          <div class="lbl-row"><span title="Image-space pixel-grid cell size (depth-edge backend) or 3-D search radius (PCA fallback). Most users won't need this — leave at default 4 px / auto. Bump up if your scene has very sparse PC density.">Denoise: cell / radius</span><span class="v" id="pc-denoise-radius-lbl">4 px / auto</span></div>
-          <input type="range" id="pc-denoise-radius" min="0" max="20" step="1" value="4">
+          <div class="lbl-row"><span title="How many pixels to dilate the detected edges before applying. The user-requested edge band width. 0 = no dilation (only the literal edge pixels get dropped). Default 2 px = a 5-pixel-wide cut band per edge.">Denoise: edge width (px)</span><span class="v" id="pc-denoise-width-lbl">2 px</span></div>
+          <input type="range" id="pc-denoise-width" min="0" max="10" step="1" value="2">
         </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Morphological erosion (image-space) of the kept region after edge detection. Eats the saw-tooth comb pattern that the per-point edge test leaves along silhouettes — a kept point survives only if every image-space point within this many pixels was also kept. 0 disables. Default 8 px.">Denoise: edge smoothness (px)</span><span class="v" id="pc-denoise-smooth-lbl">8</span></div>
-          <input type="range" id="pc-denoise-smooth" min="0" max="24" step="1" value="8">
+        <div class="toggle-grid" style="margin-top:8px;">
+          <button class="btn full" id="pc-denoise-debug" title="Render the edge-detector debug viz for the current clip: depth raster, raw edges, dilated edges side-by-side. Opens in a new browser tab so you can verify what's being cut before applying.">🔍 Show edges</button>
         </div>
+        <!-- Holdouts: the old multi-knob denoise UI used these. Kept as
+             hidden inputs so JS that probes them doesn't null-deref. -->
+        <input type="hidden" id="pc-denoise-mink"   value="0">
+        <input type="hidden" id="pc-denoise-radius" value="0">
+        <input type="hidden" id="pc-denoise-smooth" value="0">
         <!-- Holdouts -->
         <input type="hidden" id="pc-shade" value="0">
         <input type="hidden" id="obj-mask-radius" value="30">
@@ -1369,14 +1372,16 @@ const Settings = {
   // PC drops the same point. Object-only / extras / altPC panels ignore
   // clicks. Reset via the "Reset hidden PC" button in the Layers section.
   pcClickHide:    false,   // iteration 1: click-to-hide dropped; eraser is the only PC editor
-  // Scene-PC denoise. See computePcDenoiseMask_DepthEdge / fallback
+  // Scene-PC denoise. See _buildEdgeRaster() above for the algorithm
   // computePcDenoiseMask. edgeStrength is a single 0..1 knob the
   // dispatcher maps to the backend-specific threshold; 0 = off.
-  pcDenoiseMinK:         4,      // drop point if it has < minK neighbours
-  pcDenoiseEdgeStrength: 0.7,    // 0 = no edge filter; 1 = maximally aggressive
-  pcDenoiseRadius:       0,      // PCA backend: 0 = auto from bbox diag × 0.020
-  pcDenoisePixCell:      4,      // depth-edge backend: pixel-grid cell size
-  pcDenoiseSmoothPx:     8,      // morphological erosion (px) along silhouettes; 0 = off
+  // Image-space depth-edge filter (rasterize depth → detect → dilate).
+  // Two knobs only: sensitivity of the depth-jump test, and the edge
+  // dilation width in pixels. See the algorithm header above
+  // _buildEdgeRaster() for the full per-step description.
+  pcDenoiseEdgeStrength: 0.7,    // 0 = filter off; 1 = max aggressive
+  pcDenoiseWidthPx:      2,      // dilate edge mask by this many pixels
+  pcDenoiseCellPx:       3,      // detector cell size (src px); per-dataset preset
   pcClickRadius:  0.003,        // fraction of trajectory spread → world threshold
                                 // (smaller = only the literal nearest point gets hidden)
 
@@ -2140,40 +2145,42 @@ function polyToSegments(flat, into) {
   }
 }
 
-// ──────────── Scene-PC denoise ────────────
-// Two filters share a single neighbour pass; one of two backends runs
-// depending on whether the bundle has camera intrinsics:
+// ──────────── Scene-PC edge filter (image-space depth-edge) ────────────
 //
-//   * Backend A — Image-domain depth-edge detector. Each PC point was
-//     lifted from a pixel (u,v) via a known camera matrix, so we
-//     project every point back to (u,v), bucket into a 2-D pixel grid,
-//     and for each point compare its depth Z to the depth of its
-//     image-space neighbours. A relative depth jump
+// Goal: don't lift back into 3D the pixels that sit on depth edges.
+// Those are the silhouette / "fringe" points that the depth-map
+// reconstruction (MoGe etc.) consistently gets wrong — they end up
+// floating between the foreground and background surfaces and look
+// like noise hanging off objects.
 //
-//         (max Z − min Z) / Z  >  edgeTolRel
+// Algorithm:
 //
-//     means this point sits across a foreground/background boundary —
-//     i.e. it was lifted from an edge pixel and is one of those
-//     "fringe" outliers you see hanging off silhouettes. This is the
-//     point-cloud analogue of Sobel-on-depth-map, but it doesn't need
-//     a depth raster: we get the same answer from a 2-D pixel-space
-//     spatial hash. Runs whenever the bundle ships
-//     camera.intrinsics_frame0 (HOT3D / EgoDex / HD-EPIC).
+//   1. RASTERIZE. Project every PC point back to its source pixel.
+//      Perspective u = fx·x/z + cx for clips with camera intrinsics
+//      (HOT3D / EgoDex / HD-EPIC); synthetic orthographic
+//      u = (x − xmin)·scale for clips without intrinsics
+//      (DROID / DAVIS). For each pixel keep the closest Z; empty
+//      pixels stay at sentinel −1.
 //
-//   * Backend B — PCA surface-variation fallback (Pauly et al. 2002),
-//     used when intrinsics are missing (DROID, DAVIS). Builds the local
-//     3×3 covariance from radius-neighbours and computes
-//     σ = λ_min / (λ1+λ2+λ3). Flat surface → σ ≈ 0; depth edge → σ
-//     inflates because the perpendicular eigenvalue picks up the depth
-//     jump. Eigenvalues come from a closed-form solver (Smith 1961).
+//   2. DETECT. For each non-empty pixel, examine its 4-neighbours.
+//      A pixel is flagged "edge" if EITHER:
+//         (a) any 4-neighbour is empty                ← silhouette
+//         (b) max |Z_n − Z| / |Z| > rtol               ← depth jump
+//      Empty pixels are themselves edges (gaps between patches).
 //
-// Density-outlier filter (drop if neighbour count < minK) runs in both
-// backends.
+//   3. DILATE. Grow the edge mask by `widthPx` pixels via a
+//      separable sliding-window dilation (horizontal pass + vertical
+//      pass, life-counter). Default widthPx = 2 ⇒ a 1-px-wide
+//      detected edge becomes a 5-px band.
 //
-// Backend A is preferred — it's a directly interpretable threshold
-// ("don't lift across more than X% relative depth jump"), avoids the
-// 30-FLOP eigensolve per point, and exactly matches the user-visible
-// failure mode. Backend B kicks in only when there's no camera info.
+//   4. APPLY. Drop every PC point whose source pixel is in the
+//      dilated mask. The kept set = points lifted from interior
+//      surface pixels = the "good quality" set.
+//
+// renderEdgeDebugCanvas(positions, intr, opts) is provided so the
+// detector output can be visualized BEFORE applying — it renders the
+// depth raster, the raw edge mask, and the dilated mask side-by-side
+// in one PNG so per-clip tuning is verifiable.
 function getCamIntrinsicsFrame0(clipData) {
   const cam = clipData?.camera;
   if (!cam) return null;
@@ -2188,43 +2195,66 @@ function getCamIntrinsicsFrame0(clipData) {
   return null;
 }
 
-// Backend A — image-domain depth-edge filter (the "lift across an
-// edge" detector). All work happens in pixel space; the only
-// floating-point math per point is the projection (1 div, 2 mul + 2
-// add) and the depth-range comparison.
-//
-//   minK         — drop if image-space neighbour count < minK
-//   edgeTolRel   — drop if (max Z − min Z) in the 3×3 cell ring around
-//                  the point's projected pixel exceeds `edgeTolRel × Z`
-//                  (i.e. relative depth jump). 1.0 disables; ~0.06 is a
-//                  reasonable default. Lower = more aggressive.
-//   pixCell      — pixel-grid cell size (default 4 px), so the 3×3 cell
-//                  search covers a 12 × 12-pixel neighbourhood.
-//   smoothPx     — morphological erosion radius applied to the kept
-//                  region in image space. After the per-point edge test,
-//                  a kept point P survives only if every image-space
-//                  point within `smoothPx` pixels was also kept;
-//                  otherwise P is dropped too. This eats the saw-tooth
-//                  comb pattern along silhouettes (where adjacent edge
-//                  pixels alternate kept / rejected). 0 disables.
-function computePcDenoiseMask_DepthEdge(positions, intr, opts) {
+// Synthetic ortho intrinsics for clips without a real camera matrix.
+// We treat the PC's XY bbox as a 480-px-wide image. Pixel size in
+// world units = range / 480, so the depth-edge test still operates
+// in a sensible "image-domain" frame.
+function synthOrthoIntrinsics(positions) {
   const N = positions.length / 3;
-  const minK       = Math.max(0, opts.minK | 0);
-  const edgeTolRel = (opts.edgeTolRel == null) ? 1.0 : +opts.edgeTolRel;
-  const pixCell    = Math.max(1, (opts.pixCell == null) ? 4 : (opts.pixCell | 0));
-  const smoothPx   = Math.max(0, (opts.smoothPx == null) ? 0 : +opts.smoothPx);
-  if (((minK <= 0) && (edgeTolRel >= 0.999) && smoothPx <= 0) || N === 0) return null;
+  if (N === 0) return null;
+  let xmin =  Infinity, ymin =  Infinity;
+  let xmax = -Infinity, ymax = -Infinity;
+  for (let i = 0; i < N; i++) {
+    const x = positions[i*3], y = positions[i*3+1];
+    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+  }
+  const range = Math.max(xmax - xmin, ymax - ymin, 1e-6);
+  const targetPx = 480;
+  const scale = targetPx / range;
+  return { ortho: true, scale, xmin, ymin };
+}
 
+// Project the PC into a pixel grid and run steps 1-3 of the algorithm
+// above. Returns the depth raster + raw edge mask + dilated edge
+// mask + the per-point cell index that maps a PC point onto its
+// pixel — needed by both the apply step (computePcEdgeKeepMask) and
+// the debug visualizer (renderEdgeDebugCanvas).
+//
+//   rtol — relative depth-jump threshold. ∞ = filter off.
+//                Mapped from the slider: 0 → ∞ (off), 1 → 0.01.
+//   widthPx    — dilation radius applied to the edge mask. Default 2.
+function _buildEdgeRaster(positions, intr, opts) {
+  const N = positions.length / 3;
+  // MoGe-style two-criterion detector: a pixel is bad iff it sits on a
+  // depth discontinuity AND a surface-normal discontinuity (logical
+  // AND, not OR). Either criterion alone produces false positives —
+  // depth-only fires at sharp valid geometry corners, normal-only
+  // fires on smooth curved surfaces. The conjunction targets exactly
+  // the "flying pixels" that straddle a foreground/background lift.
+  //
+  // Slider knobs:
+  //   rtol       — relative depth-jump tolerance for the depth-edge
+  //                test. MoGe ships rtol=0.03 by default.
+  //   normalsTolRad — angular tolerance (radians) for the normals-edge
+  //                test. MoGe ships tol=5° by default.
+  //   widthPx    — dilation applied to the combined mask.
+  const rtol         = (opts.rtol == null) ? Infinity : +opts.rtol;
+  const normalsTolRad= (opts.normalsTolRad == null) ? Infinity : +opts.normalsTolRad;
+  const widthPx      = Math.max(0, (opts.widthPx == null) ? 2 : (opts.widthPx | 0));
+  // Source-pixels per detector cell. cellPx=1 ⇒ each detector cell is
+  // one source pixel; normals + depth-edge run at native depth-map
+  // resolution. Requires the PC to have been lifted at build-stride 1
+  // (DROID is already stride-1; HOT3D / EgoDex / HD-EPIC / DAVIS are
+  // currently stride-3 and need a re-bake to take full advantage).
+  const cellPx       = Math.max(1, (opts.cellPx == null) ? 1 : (opts.cellPx | 0));
+  if (N === 0) return null;
+
+  // ── 1. PROJECT.  Compute (u, v) per point + image-space bbox.
   const us = new Float32Array(N);
   const vs = new Float32Array(N);
   let umin =  Infinity, vmin =  Infinity;
   let umax = -Infinity, vmax = -Infinity;
-
-  // ── Pass 1 — project every point to (u, v) image space. Two paths:
-  //   * Perspective (real intrinsics): u = fx·x/z + cx ; same for v.
-  //     Points with z ≤ 0 are flagged NaN and dropped.
-  //   * Orthographic (synthesized): u = (x − xmin)·scale ; same for v.
-  //     All points are kept regardless of z sign.
   if (intr.ortho) {
     const scale = intr.scale, xmin0 = intr.xmin, ymin0 = intr.ymin;
     for (let i = 0; i < N; i++) {
@@ -2247,386 +2277,318 @@ function computePcDenoiseMask_DepthEdge(positions, intr, opts) {
     }
   }
 
-  // Grid dims.
-  const W = Math.max(1, Math.ceil((umax - umin) / pixCell) + 1);
-  const H = Math.max(1, Math.ceil((vmax - vmin) / pixCell) + 1);
+  // Detector dilation in CELLS (rounding up so a 1 px request still
+  // performs at least 1 cell of dilation). The raster lives in cell
+  // coordinates, so pad must be in cells too.
+  const dilateCells = Math.ceil(widthPx / cellPx);
+  const padCells    = Math.max(2, dilateCells + 1);
+  const W = Math.max(8, Math.ceil((umax - umin) / cellPx) + 2 * padCells + 1);
+  const H = Math.max(8, Math.ceil((vmax - vmin) / cellPx) + 2 * padCells + 1);
   const numCells = W * H;
 
-  // ── Pass 2 — counting-sort points into cells using a flat
-  // TypedArray "atomic bucket" layout. Much cheaper than
-  // Map<number, number[]> because every probe is a contiguous array
-  // read (good cache behaviour and no V8 megamorphic hash lookup).
-  //
-  //   cellOfPoint[i] = cell index that point i belongs to (−1 for
-  //                    points skipped because z <= 0)
-  //   cellStart[c]   = first index in sortedIdx that belongs to cell c
-  //   sortedIdx[…]   = point indices, contiguous per cell
-  //
-  // We allocate ONE Int32Array of length N for cellOfPoint and one
-  // Uint32Array of length numCells+1 for cellStart. With N up to 200k
-  // and numCells typically ~15k–30k for a 480-px image at pixCell=4,
-  // total grid allocation is a few hundred KB.
+  // ── 1. RASTERIZE.  For each cell keep the closest-Z point's full
+  // 3-D position (we need X, Y as well as Z to compute normals via
+  // central differences in the point map). Empty cells stay marked
+  // by `filled[k] = 0`; depth[k] mirrors ptmap[k*3+2] for convenience.
+  const ptmap = new Float32Array(numCells * 3);
+  const depth = new Float32Array(numCells);
+  depth.fill(-1);
+  const filled = new Uint8Array(numCells);
   const cellOfPoint = new Int32Array(N);
-  const cellCount   = new Uint32Array(numCells);
+  cellOfPoint.fill(-1);
   for (let i = 0; i < N; i++) {
     const u = us[i];
-    if (u !== u) { cellOfPoint[i] = -1; continue; }      // NaN check (faster than Number.isNaN)
-    const cu = ((u - umin) / pixCell) | 0;
-    const cv = ((vs[i] - vmin) / pixCell) | 0;
-    const k  = cu + cv * W;
+    if (u !== u) continue;
+    const cu = (Math.floor((u       - umin) / cellPx) | 0) + padCells;
+    const cv = (Math.floor((vs[i]   - vmin) / cellPx) | 0) + padCells;
+    if (cu < 0 || cu >= W || cv < 0 || cv >= H) continue;
+    const k = cu + cv * W;
     cellOfPoint[i] = k;
-    cellCount[k]++;
-  }
-  // Prefix-sum → cellStart.
-  const cellStart = new Uint32Array(numCells + 1);
-  let acc = 0;
-  for (let c = 0; c < numCells; c++) {
-    cellStart[c] = acc;
-    acc += cellCount[c];
-  }
-  cellStart[numCells] = acc;
-  // Scatter. Reuse cellCount as a running write-offset (saves an alloc).
-  const sortedIdx = new Uint32Array(acc);
-  const cellOff   = cellCount;   // alias
-  cellOff.fill(0);
-  for (let i = 0; i < N; i++) {
-    const k = cellOfPoint[i];
-    if (k < 0) continue;
-    sortedIdx[cellStart[k] + cellOff[k]++] = i;
-  }
-
-  // ── Pass 3 — edge test. Two independent criteria both contribute
-  // to rejection; both fire on the same neighbour scan so the cost is
-  // shared.
-  //
-  //   (a) Per-CELL depth range: catches cells that straddle a depth
-  //       jump even when no individual point's local ring saw it. A
-  //       cell is flagged bad if (zmax_c − zmin_c) / |zmean_c| exceeds
-  //       the relative-jump threshold. Computed once over the
-  //       cellMin / cellMax arrays before the per-point pass starts.
-  //
-  //   (b) Per-POINT depth range: original check — scans the SEARCH
-  //       ring around the point's bucket and tests the same relative
-  //       jump against the point's own Z. Search ring expanded from
-  //       3×3 → 5×5 cells (configurable) so genuine edges trigger on
-  //       more points and the bad-cell mask gets denser, leaving
-  //       fewer comb-tooth survivors for the closing pass to handle.
-  const searchRing = 2;   // 5×5 cells. Bump to 3 for 7×7 if needed.
-  const keep = new Uint8Array(N);
-  const edgeOn = (edgeTolRel < 0.999);
-
-  // (a) Per-cell aggregate. cellMin / cellMax track depth range; bad
-  // cells get flagged before the per-point loop runs.
-  const cellBadAgg = new Uint8Array(numCells);
-  if (edgeOn) {
-    const cellMin = new Float32Array(numCells);
-    const cellMax = new Float32Array(numCells);
-    const cellSumZ = new Float32Array(numCells);
-    const cellCnt  = new Uint32Array(numCells);
-    for (let c = 0; c < numCells; c++) { cellMin[c] = Infinity; cellMax[c] = -Infinity; }
-    for (let i = 0; i < N; i++) {
-      const k = cellOfPoint[i];
-      if (k < 0) continue;
-      const z = positions[i*3 + 2];
-      if (z < cellMin[k]) cellMin[k] = z;
-      if (z > cellMax[k]) cellMax[k] = z;
-      cellSumZ[k] += z;
-      cellCnt[k]++;
-    }
-    for (let c = 0; c < numCells; c++) {
-      if (cellCnt[c] < 2) continue;
-      const range = cellMax[c] - cellMin[c];
-      const mean  = cellSumZ[c] / cellCnt[c];
-      const denom = mean > 0.01 ? mean : (mean < -0.01 ? -mean : 0.01);
-      if (range / denom > edgeTolRel) cellBadAgg[c] = 1;
+    const z = positions[i*3 + 2];
+    if (!filled[k] || z < depth[k]) {
+      ptmap[k*3]   = positions[i*3];
+      ptmap[k*3+1] = positions[i*3+1];
+      ptmap[k*3+2] = z;
+      depth[k] = z;
+      filled[k] = 1;
     }
   }
 
-  // (b) Per-point ring scan.
-  for (let i = 0; i < N; i++) {
-    const k = cellOfPoint[i];
-    if (k < 0) continue;
-    if (cellBadAgg[k]) continue;  // already-bad cell (criterion a)
-    const pz = positions[i*3 + 2];
-    const cv = (k / W) | 0;
-    const cu = k - cv * W;
-    let zmin = pz, zmax = pz, cnt = 0;
-    for (let dv = -searchRing; dv <= searchRing; dv++) {
-      const ccv = cv + dv;
-      if (ccv < 0 || ccv >= H) continue;
-      const rowBase = ccv * W;
-      for (let du = -searchRing; du <= searchRing; du++) {
-        const ccu = cu + du;
-        if (ccu < 0 || ccu >= W) continue;
-        const cellK = ccu + rowBase;
-        const start = cellStart[cellK];
-        const end   = cellStart[cellK + 1];
-        for (let bi = start; bi < end; bi++) {
-          const j = sortedIdx[bi];
-          if (j === i) continue;
-          const jz = positions[j*3 + 2];
-          if (jz < zmin) zmin = jz;
-          if (jz > zmax) zmax = jz;
-          cnt++;
-        }
-      }
-    }
-    if (cnt < minK) continue;
-    if (edgeOn) {
-      const denom = pz > 0.01 ? pz : (pz < -0.01 ? -pz : 0.01);
-      const relJump = (zmax - zmin) / denom;
-      if (relJump > edgeTolRel) continue;
-    }
-    keep[i] = 1;
-  }
-
-  // ── Pass 4 — binary cut with a SMOOTH boundary, via morphological
-  // closing of the bad-cell mask in pixel space. Two separable sweeps:
-  //
-  //   1. Dilate cellBad by smoothCells   — fills the comb-tooth gaps
-  //      between adjacent rejected cells along the silhouette.
-  //   2. Erode the result by smoothCells — shrinks the dilated region
-  //      back to roughly its original outline, so the dilation isn't
-  //      a net "eat into the surface".
-  //
-  // Net effect: the bad region keeps its overall size but its boundary
-  // gets smoothed (closing = shape completion). Points in the closed
-  // mask are dropped — same kind of binary cut as before, just with a
-  // clean outline instead of comb teeth.
-  //
-  // Both passes use a sliding-window life-counter, O(numCells · 1)
-  // each. The complement-trick for erosion: erode(X) = ¬dilate(¬X), so
-  // we can reuse exactly the same dilation routine.
-  if (smoothPx > 0) {
-    const smoothCells = Math.max(1, Math.ceil(smoothPx / pixCell));
-    const cellBad = new Uint8Array(numCells);
-    for (let i = 0; i < N; i++) {
-      const k = cellOfPoint[i];
-      if (k >= 0 && !keep[i]) cellBad[k] = 1;
-    }
-
-    // Separable box dilation of an 8-bit cell mask by `r` cells. The
-    // life counter expires after r+1 cells of "no bad seen", so a
-    // single bad cell propagates its 1 across r cells in each
-    // direction along the scan line.
-    const dilateMask = (src, r) => {
-      const dst = new Uint8Array(numCells);
-      const tmp = new Uint8Array(numCells);
-      // Horizontal
-      for (let v = 0; v < H; v++) {
-        const base = v * W;
-        let life = 0;
-        for (let u = 0; u < W; u++) {
-          if (src[base + u]) life = r + 1;
-          if (life > 0) { tmp[base + u] = 1; life--; }
-        }
-        life = 0;
-        for (let u = W - 1; u >= 0; u--) {
-          if (src[base + u]) life = r + 1;
-          if (life > 0) { tmp[base + u] = 1; life--; }
-        }
-      }
-      // Vertical
-      for (let u = 0; u < W; u++) {
-        let life = 0;
-        for (let v = 0; v < H; v++) {
-          const k = u + v * W;
-          if (tmp[k]) life = r + 1;
-          if (life > 0) { dst[k] = 1; life--; }
-        }
-        life = 0;
-        for (let v = H - 1; v >= 0; v--) {
-          const k = u + v * W;
-          if (tmp[k]) life = r + 1;
-          if (life > 0) { dst[k] = 1; life--; }
-        }
-      }
-      return dst;
-    };
-
-    // closing(X) = erode(dilate(X)) = ¬dilate(¬dilate(X))
-    const dilated = dilateMask(cellBad, smoothCells);
-    // Complement, dilate, complement → erosion.
-    const inv = new Uint8Array(numCells);
-    for (let c = 0; c < numCells; c++) inv[c] = dilated[c] ? 0 : 1;
-    const invDilated = dilateMask(inv, smoothCells);
-    const closed = new Uint8Array(numCells);
-    for (let c = 0; c < numCells; c++) closed[c] = invDilated[c] ? 0 : 1;
-
-    // Apply the closed mask: a kept point in a closed bad cell now
-    // becomes a rejected point. This drops the comb-tooth "good
-    // strips" between rejected stripes without expanding the bad
-    // region outward.
-    for (let i = 0; i < N; i++) {
-      if (keep[i] && closed[cellOfPoint[i]]) keep[i] = 0;
+  // ── 2A. NORMALS via central differences on the point map. Only
+  // cells with all 4 cardinal neighbours filled get a normal — that
+  // way the tangent vectors are well-defined and we avoid wild
+  // normals on silhouette pixels (which would defeat the purpose of
+  // the normals-edge test). Stored as a unit vector per cell.
+  const normals = new Float32Array(numCells * 3);
+  const hasNormal = new Uint8Array(numCells);
+  for (let v = 1; v < H - 1; v++) {
+    const base = v * W;
+    for (let u = 1; u < W - 1; u++) {
+      const k = base + u;
+      if (!filled[k]) continue;
+      const kL = k - 1, kR = k + 1, kU = k - W, kD = k + W;
+      if (!filled[kL] || !filled[kR] || !filled[kU] || !filled[kD]) continue;
+      const txX = ptmap[kR*3]   - ptmap[kL*3];
+      const txY = ptmap[kR*3+1] - ptmap[kL*3+1];
+      const txZ = ptmap[kR*3+2] - ptmap[kL*3+2];
+      const tyX = ptmap[kD*3]   - ptmap[kU*3];
+      const tyY = ptmap[kD*3+1] - ptmap[kU*3+1];
+      const tyZ = ptmap[kD*3+2] - ptmap[kU*3+2];
+      // Normal = Tx × Ty.
+      const nX = txY * tyZ - txZ * tyY;
+      const nY = txZ * tyX - txX * tyZ;
+      const nZ = txX * tyY - txY * tyX;
+      const len = Math.sqrt(nX*nX + nY*nY + nZ*nZ);
+      if (len < 1e-9) continue;
+      const inv = 1 / len;
+      normals[k*3]   = nX * inv;
+      normals[k*3+1] = nY * inv;
+      normals[k*3+2] = nZ * inv;
+      hasNormal[k] = 1;
     }
   }
 
-  return keep;
-}
-
-function eig3sym(a, b, c, d, e, f) {
-  // Eigenvalues of [[a,b,c],[b,d,e],[c,e,f]] via Smith 1961. Closed form,
-  // numerically stable for the symmetric real case (always three real
-  // roots). Returns the three roots in unspecified order.
-  const p1 = b*b + c*c + e*e;
-  if (p1 < 1e-30) return [a, d, f];  // already diagonal
-  const q  = (a + d + f) / 3;
-  const p2 = (a-q)*(a-q) + (d-q)*(d-q) + (f-q)*(f-q) + 2*p1;
-  const p  = Math.sqrt(p2 / 6);
-  // B = (M − qI) / p ; det(B) / 2
-  const Ba = (a-q)/p, Bd = (d-q)/p, Bf = (f-q)/p;
-  const Bb = b/p,     Bc = c/p,     Be = e/p;
-  let r = (Ba*(Bd*Bf - Be*Be) - Bb*(Bb*Bf - Be*Bc) + Bc*(Bb*Be - Bd*Bc)) / 2;
-  if (r < -1) r = -1; else if (r > 1) r = 1;
-  const phi  = Math.acos(r) / 3;
-  const e1   = q + 2*p*Math.cos(phi);
-  const e3   = q + 2*p*Math.cos(phi + (2*Math.PI/3));
-  const e2   = 3*q - e1 - e3;
-  return [e1, e2, e3];
-}
-
-function computePcDenoiseMask(positions, opts) {
-  const N = positions.length / 3;
-  const minK           = Math.max(0, opts.minK | 0);
-  const surfaceVarTol  = (opts.surfaceVarTol == null) ? 1.0 : +opts.surfaceVarTol;
-  const radiusFrac     = (opts.radiusFrac == null) ? 0.020 : +opts.radiusFrac;
-  const off = (minK <= 0) && (surfaceVarTol >= 0.333);
-  if (off || N === 0) return null;
-
-  // Bbox + diagonal → auto radius.
-  let xmin= Infinity, ymin= Infinity, zmin= Infinity;
-  let xmax=-Infinity, ymax=-Infinity, zmax=-Infinity;
-  for (let i = 0; i < N; i++) {
-    const x = positions[i*3], y = positions[i*3+1], z = positions[i*3+2];
-    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
-    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
-    if (z < zmin) zmin = z; if (z > zmax) zmax = z;
-  }
-  const dx = xmax-xmin, dy = ymax-ymin, dz = zmax-zmin;
-  const diag = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
-  const radius = (opts.radius && opts.radius > 0) ? +opts.radius
-                                                   : Math.max(1e-4, diag * radiusFrac);
-  const r2 = radius * radius;
-
-  // Uniform-grid bucket — cell = radius so each query needs only the
-  // 3³ surrounding cells.
-  const cell = radius;
-  const nx = Math.max(1, Math.ceil(dx / cell) + 1);
-  const ny = Math.max(1, Math.ceil(dy / cell) + 1);
-  const grid = new Map();
-  for (let i = 0; i < N; i++) {
-    const cx = ((positions[i*3]   - xmin) / cell) | 0;
-    const cy = ((positions[i*3+1] - ymin) / cell) | 0;
-    const cz = ((positions[i*3+2] - zmin) / cell) | 0;
-    const k  = cx + cy * nx + cz * nx * ny;
-    let bucket = grid.get(k);
-    if (!bucket) { bucket = []; grid.set(k, bucket); }
-    bucket.push(i);
-  }
-
-  const keep = new Uint8Array(N);
-  for (let i = 0; i < N; i++) {
-    const px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
-    const cx = ((px - xmin) / cell) | 0;
-    const cy = ((py - ymin) / cell) | 0;
-    const cz = ((pz - zmin) / cell) | 0;
-    // First and second moments accumulated over neighbours (the point P
-    // itself is excluded — including it would bias λ_min upward for
-    // every point, which would just rescale the threshold).
-    let cnt = 0;
-    let sx = 0, sy = 0, sz = 0;
-    let sxx= 0, sxy= 0, sxz= 0, syy= 0, syz= 0, szz= 0;
-    for (let ddx = -1; ddx <= 1; ddx++) {
-      const ccx = cx + ddx;  if (ccx < 0 || ccx >= nx) continue;
-      for (let ddy = -1; ddy <= 1; ddy++) {
-        const ccy = cy + ddy;  if (ccy < 0) continue;
-        for (let ddz = -1; ddz <= 1; ddz++) {
-          const ccz = cz + ddz;  if (ccz < 0) continue;
-          const bucket = grid.get(ccx + ccy * nx + ccz * nx * ny);
-          if (!bucket) continue;
-          for (let bi = 0; bi < bucket.length; bi++) {
-            const j = bucket[bi];
-            if (j === i) continue;
-            const jx = positions[j*3],   jy = positions[j*3+1], jz = positions[j*3+2];
-            const ex = jx - px, ey = jy - py, ez = jz - pz;
-            const d2 = ex*ex + ey*ey + ez*ez;
-            if (d2 > r2) continue;
-            cnt++;
-            sx += jx; sy += jy; sz += jz;
-            sxx+= jx*jx; sxy+= jx*jy; sxz+= jx*jz;
-            syy+= jy*jy; syz+= jy*jz; szz+= jz*jz;
+  // ── 2B. DEPTH-EDGE mask (MoGe utils3d.depth_edge).
+  // Per 3×3 window: range = max(Z) − min(Z). Edge iff
+  // range > rtol · |Z_center|. Relative threshold so the same
+  // sensitivity works across scene scales.
+  const depthEdge = new Uint8Array(numCells);
+  if (Number.isFinite(rtol)) {
+    for (let v = 1; v < H - 1; v++) {
+      const base = v * W;
+      for (let u = 1; u < W - 1; u++) {
+        const k = base + u;
+        if (!filled[k]) continue;
+        const z = depth[k];
+        let zmin = z, zmax = z;
+        for (let dv = -1; dv <= 1; dv++) {
+          for (let du = -1; du <= 1; du++) {
+            const kk = (u + du) + (v + dv) * W;
+            if (!filled[kk]) continue;
+            const zn = depth[kk];
+            if (zn < zmin) zmin = zn;
+            if (zn > zmax) zmax = zn;
           }
         }
+        const denom = Math.abs(z) > 0.01 ? Math.abs(z) : 0.01;
+        if (zmax - zmin > rtol * denom) depthEdge[k] = 1;
       }
     }
-    if (cnt < minK) continue;                       // density outlier
-    // PCA surface variation. Needs ≥ 3 neighbours for a non-degenerate
-    // 3×3 covariance; with fewer the point is too sparse to judge —
-    // treat it as a noisy outlier and drop it (the minK guard above
-    // already covers minK ≥ 3).
-    if (surfaceVarTol < 0.333 && cnt >= 3) {
-      const invN = 1 / cnt;
-      const mx = sx * invN, my = sy * invN, mz = sz * invN;
-      const cxx = sxx * invN - mx*mx;
-      const cxy = sxy * invN - mx*my;
-      const cxz = sxz * invN - mx*mz;
-      const cyy = syy * invN - my*my;
-      const cyz = syz * invN - my*mz;
-      const czz = szz * invN - mz*mz;
-      const trace = cxx + cyy + czz;
-      if (trace > 1e-20) {
-        const ev = eig3sym(cxx, cxy, cxz, cyy, cyz, czz);
-        let lmin = ev[0];
-        if (ev[1] < lmin) lmin = ev[1];
-        if (ev[2] < lmin) lmin = ev[2];
-        if (lmin < 0) lmin = 0;   // numerical noise
-        const sigma = lmin / trace;
-        if (sigma > surfaceVarTol) continue;
+  }
+
+  // ── 2C. NORMALS-EDGE mask (MoGe utils3d.normals_edge).
+  // Per 3×3 window: minDot = min over neighbour normals of (N · N_n).
+  // Edge iff minDot < cos(normalsTolRad). Catches surface-orientation
+  // discontinuities that depth-only misses.
+  const normalsEdge = new Uint8Array(numCells);
+  if (Number.isFinite(normalsTolRad)) {
+    const cosTol = Math.cos(normalsTolRad);
+    for (let v = 1; v < H - 1; v++) {
+      const base = v * W;
+      for (let u = 1; u < W - 1; u++) {
+        const k = base + u;
+        if (!hasNormal[k]) continue;
+        const nx = normals[k*3], ny = normals[k*3+1], nz = normals[k*3+2];
+        let minDot = 1;
+        for (let dv = -1; dv <= 1; dv++) {
+          for (let du = -1; du <= 1; du++) {
+            if (du === 0 && dv === 0) continue;
+            const kk = (u + du) + (v + dv) * W;
+            if (!hasNormal[kk]) continue;
+            const dot = nx * normals[kk*3]
+                      + ny * normals[kk*3+1]
+                      + nz * normals[kk*3+2];
+            if (dot < minDot) minDot = dot;
+          }
+        }
+        if (minDot < cosTol) normalsEdge[k] = 1;
       }
     }
-    keep[i] = 1;
+  }
+
+  // ── 2D. AND the two masks to get the final "bad-edge" mask.
+  // MoGe: mask = mask & ~(depth_edge & normals_edge).
+  const edgeRaw = new Uint8Array(numCells);
+  for (let k = 0; k < numCells; k++) {
+    if (depthEdge[k] && normalsEdge[k]) edgeRaw[k] = 1;
+  }
+
+  // ── 3. DILATE the edge mask by dilateCells (= ceil(widthPx / cellPx))
+  // using a separable sliding-window dilation. Life counter expires
+  // after dilateCells + 1 cells of "no edge seen", so a 1-cell-wide
+  // detected edge fattens by dilateCells on each side.
+  let edgeMask = edgeRaw;
+  if (dilateCells > 0) {
+    const tmp = new Uint8Array(numCells);
+    // Horizontal: L→R then R→L per row.
+    for (let v = 0; v < H; v++) {
+      const base = v * W;
+      let life = 0;
+      for (let u = 0; u < W; u++) {
+        if (edgeRaw[base + u]) life = dilateCells + 1;
+        if (life > 0) { tmp[base + u] = 1; life--; }
+      }
+      life = 0;
+      for (let u = W - 1; u >= 0; u--) {
+        if (edgeRaw[base + u]) life = dilateCells + 1;
+        if (life > 0) { tmp[base + u] = 1; life--; }
+      }
+    }
+    // Vertical: T→B then B→T per column, reading from tmp.
+    const dilated = new Uint8Array(numCells);
+    for (let u = 0; u < W; u++) {
+      let life = 0;
+      for (let v = 0; v < H; v++) {
+        const k = u + v * W;
+        if (tmp[k]) life = dilateCells + 1;
+        if (life > 0) { dilated[k] = 1; life--; }
+      }
+      life = 0;
+      for (let v = H - 1; v >= 0; v--) {
+        const k = u + v * W;
+        if (tmp[k]) life = dilateCells + 1;
+        if (life > 0) { dilated[k] = 1; life--; }
+      }
+    }
+    edgeMask = dilated;
+  }
+
+  return {
+    depth, normals, hasNormal, filled,
+    depthEdge, normalsEdge, edgeRaw, edgeMask,
+    cellOfPoint,
+    W, H, umin, vmin, padCells, cellPx, N,
+    rtol, normalsTolRad, widthPx,
+  };
+}
+
+// Public: full edge filter ⇒ binary keep mask. Returns null when the
+// filter is fully off (both criteria disabled).
+function computePcEdgeMask(positions, intr, opts) {
+  const rtol = (opts.rtol == null) ? Infinity : +opts.rtol;
+  const nt   = (opts.normalsTolRad == null) ? Infinity : +opts.normalsTolRad;
+  const widthPx = Math.max(0, (opts.widthPx == null) ? 2 : (opts.widthPx | 0));
+  if (!Number.isFinite(rtol) && !Number.isFinite(nt) && widthPx <= 0) return null;
+  const r = _buildEdgeRaster(positions, intr, opts);
+  if (!r) return null;
+  const keep = new Uint8Array(r.N);
+  const m = r.edgeMask;
+  for (let i = 0; i < r.N; i++) {
+    const k = r.cellOfPoint[i];
+    if (k < 0) continue;
+    if (!m[k]) keep[i] = 1;
   }
   return keep;
 }
 
-// Synthesize orthographic "intrinsics" from the PC's X / Y bounding-box
-// for clips that don't ship a real camera matrix (DROID, DAVIS). We treat
-// the PC's XY extent as a 480-pixel-wide synthetic image, so the image-
-// domain depth-edge backend can run on these clips too — same fast
-// algorithm, same cache layout, no PCA / eigensolve fallback needed.
-//
-// This works because for all currently-supported bundles the PC's
-// third axis IS depth (the existing maxSceneDepth slider already
-// depends on this for HOT3D / DROID / HD-EPIC). The XY axes aren't
-// perspective-projected pixel coords for DROID, but for depth-edge
-// detection we only need "points that are 2-D neighbours" — and points
-// that are close in (X, Y) ARE close on the source depth surface, so
-// the image-space depth-jump test still produces the right answer.
-function synthOrthoIntrinsics(positions) {
-  const N = positions.length / 3;
-  if (N === 0) return null;
-  let xmin =  Infinity, ymin =  Infinity;
-  let xmax = -Infinity, ymax = -Infinity;
-  for (let i = 0; i < N; i++) {
-    const x = positions[i*3], y = positions[i*3+1];
-    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
-    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+// Debug visualizer — 5 panels side-by-side:
+//   [ depth raster | normals (RGB) | depth_edge | normals_edge | AND (final) ]
+// Lets you see exactly which criterion each cell trips. Used by the
+// "Show edges" sidebar button.
+function renderEdgeDebugCanvas(positions, intr, opts) {
+  const r = _buildEdgeRaster(positions, intr, opts);
+  if (!r) return null;
+  const { depth, normals, hasNormal, filled,
+          depthEdge, normalsEdge, edgeRaw, edgeMask, W, H } = r;
+  // Depth range for greyscale normalisation.
+  let zlo = Infinity, zhi = -Infinity;
+  for (let i = 0; i < W * H; i++) {
+    if (filled[i]) {
+      const z = depth[i];
+      if (z < zlo) zlo = z;
+      if (z > zhi) zhi = z;
+    }
   }
-  const range = Math.max(xmax - xmin, ymax - ymin, 1e-6);
-  // 480 = match the dimension of the smallest real-intrinsics image
-  // (HD-EPIC video_dim_HW = 480×480). Keeps pixCell tuning portable.
-  const targetPx = 480;
-  const scale = targetPx / range;
-  return { ortho: true, scale, xmin, ymin };
+  if (!Number.isFinite(zlo)) { zlo = 0; zhi = 1; }
+  const zrange = zhi - zlo || 1;
+  const NUM_PANELS = 5;
+  const GAP = 8;
+  const canvas = document.createElement('canvas');
+  canvas.width  = W * NUM_PANELS + GAP * (NUM_PANELS - 1);
+  canvas.height = H + 20;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const img = ctx.createImageData(canvas.width, H);
+  const dataW = canvas.width;
+  const drawCell = (panelIdx, k, r8, g8, b8) => {
+    const u = (k % W);
+    const v = (k / W) | 0;
+    const off = panelIdx * (W + GAP);
+    const idx = ((u + off) + v * dataW) * 4;
+    img.data[idx]     = r8;
+    img.data[idx + 1] = g8;
+    img.data[idx + 2] = b8;
+    img.data[idx + 3] = 255;
+  };
+  for (let v = 0; v < H; v++) {
+    for (let u = 0; u < W; u++) {
+      const k = u + v * W;
+      const isF = filled[k];
+      // Panel 0 — depth.
+      if (isF) {
+        const gr = 255 - Math.round(((depth[k] - zlo) / zrange) * 220);
+        drawCell(0, k, gr, gr, gr);
+      } else {
+        drawCell(0, k, 30, 30, 30);
+      }
+      // Panel 1 — normals RGB. Map (nx,ny,nz) ∈ [−1,1] → [0,255].
+      if (hasNormal[k]) {
+        const nx = normals[k*3], ny = normals[k*3+1], nz = normals[k*3+2];
+        drawCell(1, k,
+          Math.round((nx * 0.5 + 0.5) * 255),
+          Math.round((ny * 0.5 + 0.5) * 255),
+          Math.round((nz * 0.5 + 0.5) * 255));
+      } else if (isF) {
+        drawCell(1, k, 60, 60, 60);
+      } else {
+        drawCell(1, k, 30, 30, 30);
+      }
+      // Panel 2 — depth_edge mask (red).
+      if (depthEdge[k])      drawCell(2, k, 255, 60, 60);
+      else if (isF)          drawCell(2, k, 80, 80, 80);
+      else                   drawCell(2, k, 30, 30, 30);
+      // Panel 3 — normals_edge mask (cyan).
+      if (normalsEdge[k])    drawCell(3, k, 50, 200, 220);
+      else if (isF)          drawCell(3, k, 80, 80, 80);
+      else                   drawCell(3, k, 30, 30, 30);
+      // Panel 4 — final dilated AND mask (orange).
+      if (edgeMask[k])       drawCell(4, k, 255, 160, 40);
+      else if (isF)          drawCell(4, k, 80, 80, 80);
+      else                   drawCell(4, k, 30, 30, 30);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.fillStyle = '#e5e7eb';
+  ctx.font = '12px monospace';
+  ctx.textBaseline = 'top';
+  const labelY = H + 4;
+  const lab = (idx, txt) => ctx.fillText(txt, idx * (W + GAP) + 4, labelY);
+  const tolDeg = (r.normalsTolRad * 180 / Math.PI).toFixed(1);
+  lab(0, 'depth raster');
+  lab(1, 'normals (RGB)');
+  lab(2, `depth_edge  rtol=${r.rtol.toFixed(3)}`);
+  lab(3, `normals_edge tol=${tolDeg}°`);
+  lab(4, `AND, dilated widthPx=${r.widthPx}`);
+  return canvas;
 }
 
-// Dispatcher — runs the image-domain depth-edge backend in either
-// perspective mode (real frame-0 intrinsics) or orthographic mode
-// (synthesized from PC bbox). Returns a Uint8Array per-point keep
-// mask; the smoothPx pass cleans up the cut silhouette via
-// morphological closing, so the result is still a binary include
-// flag (1 = render the point, 0 = drop) but with a smooth boundary.
+// Cached dispatcher used by Panel.buildStatic. Picks perspective vs
+// orthographic intrinsics; keys the cache on the full param tuple so
+// any slider change invalidates a stale mask. The single
+// `edgeStrength` knob (0..1) maps onto the underlying relative depth
+// tolerance via a lerp: 0 ⇒ Infinity (filter off); 1 ⇒ 0.01.
+// Map the single 0..1 sensitivity slider to both MoGe thresholds.
+// At s = 0.7 we land near MoGe's published defaults (rtol=0.03,
+// tol=5°). s = 0 disables the filter entirely (both thresholds → ∞).
+function _sliderToThresholds(s) {
+  if (s <= 0) return { rtol: Infinity, normalsTolRad: Infinity };
+  // Linear lerp in the parameters so the slider is monotone aggressive.
+  const rtol         = (1 - s) * 0.10 + s * 0.005;        // 0.10 → 0.005
+  const tolDeg       = (1 - s) * 20   + s * 2;            // 20°  → 2°
+  return { rtol, normalsTolRad: tolDeg * Math.PI / 180 };
+}
+
 function getPcDenoiseMask(clipData, positions, opts) {
   if (!clipData) return null;
   let intr = getCamIntrinsicsFrame0(clipData);
@@ -2637,22 +2599,34 @@ function getPcDenoiseMask(clipData, positions, opts) {
   }
   if (!intr) return null;
   const s   = Math.max(0, Math.min(1, +opts.edgeStrength || 0));
-  const key = `${mode}|${opts.minK}|${s.toFixed(3)}|${opts.pixCell || 0}|${opts.smoothPx || 0}`;
+  const widthPx = Math.max(0, opts.widthPx | 0);
+  const cellPx  = Math.max(1, opts.cellPx | 0);
+  const key = `${mode}|${s.toFixed(3)}|${widthPx}|${cellPx}`;
   if (clipData._pcDenoiseCacheKey === key && clipData._pcDenoiseMask !== undefined) {
     return clipData._pcDenoiseMask;
   }
-  // Strength 0 → tol 1.0 (off); strength 1 → tol 0.01 (≥1 % depth jump).
-  const edgeTolRel = (s <= 0) ? 1.0 : (0.6 - (0.6 - 0.01) * s);
-  const mask = computePcDenoiseMask_DepthEdge(positions, intr, {
-    minK:       opts.minK,
-    edgeTolRel: edgeTolRel,
-    pixCell:    opts.pixCell || 4,
-    smoothPx:   opts.smoothPx || 0,
+  const { rtol, normalsTolRad } = _sliderToThresholds(s);
+  const mask = computePcEdgeMask(positions, intr, {
+    rtol, normalsTolRad, widthPx, cellPx,
   });
   clipData._pcDenoiseCacheKey = key;
   clipData._pcDenoiseMask = mask;
   return mask;
 }
+
+// Public helper that re-runs the debug visualizer with the live
+// slider state. Used by the "Show edges" button.
+function getPcEdgeDebugCanvas(clipData, positions) {
+  let intr = getCamIntrinsicsFrame0(clipData);
+  if (!intr) intr = synthOrthoIntrinsics(positions);
+  if (!intr) return null;
+  const s = Math.max(0, Math.min(1, +Settings.pcDenoiseEdgeStrength || 0));
+  const widthPx = Math.max(0, Settings.pcDenoiseWidthPx | 0);
+  const cellPx  = Math.max(1, Settings.pcDenoiseCellPx | 0);
+  const { rtol, normalsTolRad } = _sliderToThresholds(s);
+  return renderEdgeDebugCanvas(positions, intr, { rtol, normalsTolRad, widthPx, cellPx });
+}
+
 
 // ──────────── Panel: one 3D viewer ────────────
 class Panel {
@@ -3094,14 +3068,14 @@ class Panel {
         const dist   = clipData._pcDist || null;
         const maskR  = (dist && Settings.objMaskRadiusPx > 0) ? Settings.objMaskRadiusPx : -1;
         const maxZ   = (Settings.maxSceneDepth > 0) ? Settings.maxSceneDepth : Infinity;
-        // Binary keep mask with a smooth-closed silhouette (see
-        // computePcDenoiseMask_DepthEdge pass 4).
+        // Binary keep mask from the image-space depth-edge detector:
+        // rasterize → detect 4-neighbour depth jumps + silhouettes →
+        // dilate by widthPx → drop every point whose source pixel is
+        // an edge. See the algorithm block above buildEdgeRaster.
         const denoise = getPcDenoiseMask(clipData, positions, {
-          minK:          Settings.pcDenoiseMinK | 0,
-          edgeStrength:  Settings.pcDenoiseEdgeStrength,
-          radius:        Settings.pcDenoiseRadius || 0,
-          pixCell:       Settings.pcDenoisePixCell || 4,
-          smoothPx:      Settings.pcDenoiseSmoothPx || 0,
+          edgeStrength: Settings.pcDenoiseEdgeStrength,
+          widthPx:      Settings.pcDenoiseWidthPx | 0,
+          cellPx:       Settings.pcDenoiseCellPx | 0,
         });
         const Nfull  = positions.length / 3;
         const anyFilter = (hidden && hidden.size) || maskR > 0 || Number.isFinite(maxZ) || !!denoise;
@@ -4893,30 +4867,44 @@ function applyDatasetDefaults(clipUrl) {
   // (and the slider id is derived by transforming the key). Only listed
   // datasets get presets; everything else inherits the global defaults
   // baked into the Settings object at the top of the file.
+  // cellPx must be ≥ the dataset's build-time stride or the depth raster
+  // is too sparse for stable normals. Build-time strides:
+  //   HOT3D   → 3 (regen_hot3d_dense_scene_pc.py / prepare_hot3d_singleclip)
+  //   DROID   → 1 (dense_pc_droid16.py / rebuild_pc_droid_dense.py)
+  //   EgoDex  → 1 (prepare_clip.py once re-baked from default 3)
+  //   HD-EPIC → 3 (prepare_clip.py; not yet re-baked)
+  //   DAVIS   → 3 (prepare_davis_singleclip.py)
   const presets = {
     hot3d: {
-      pcDenoiseMinK:         8,
       pcDenoiseEdgeStrength: 0.7,
-      pcDenoisePixCell:      2,    // 2 px (img)
-      pcDenoiseRadius:       0.02, // 0.02 m (3D fallback)
-      pcDenoiseSmoothPx:     2,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       3,
     },
     droid: {
       maxSceneDepth:         3.0,
-      pcSize:                12.0,
-      pcDenoiseMinK:         1,
-      pcDenoiseEdgeStrength: 0.0,
-      pcDenoisePixCell:      6,
-      pcDenoiseRadius:       0.06,
-      pcDenoiseSmoothPx:     1,
+      pcDenoiseEdgeStrength: 0.3,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       2,
+    },
+    egodex: {
+      pcDenoiseEdgeStrength: 0.7,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       2,    // valid after re-bake at stride-1
+    },
+    hdepic: {
+      pcDenoiseEdgeStrength: 0.7,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       3,
+    },
+    davis: {
+      pcDenoiseEdgeStrength: 0.7,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       3,
     },
   };
   const p = presets[dataset];
   if (!p) return;
 
-  // Helper that mirrors Settings → slider value + label so the sidebar
-  // shows what's actually being applied. The label formatter for each
-  // slider matches whatever the corresponding wireSlider() call uses.
   const setSlider = (id, lblId, v, fmt) => {
     const el = document.getElementById(id);
     if (el) el.value = String(v);
@@ -4928,32 +4916,16 @@ function applyDatasetDefaults(clipUrl) {
     Settings.maxSceneDepth = p.maxSceneDepth;
     setSlider('max-scene-depth', 'max-scene-depth-lbl', p.maxSceneDepth, v => `${v.toFixed(2)} m`);
   }
-  if (p.pcSize !== undefined) {
-    Settings.pcSize = p.pcSize;
-    setSlider('pc-size', 'pc-size-lbl', p.pcSize, v => v.toFixed(1));
-  }
-  if (p.pcDenoiseMinK !== undefined) {
-    Settings.pcDenoiseMinK = p.pcDenoiseMinK;
-    setSlider('pc-denoise-mink', 'pc-denoise-mink-lbl', p.pcDenoiseMinK, v => `${v|0}`);
-  }
   if (p.pcDenoiseEdgeStrength !== undefined) {
     Settings.pcDenoiseEdgeStrength = p.pcDenoiseEdgeStrength;
     setSlider('pc-denoise-edge', 'pc-denoise-edge-lbl', p.pcDenoiseEdgeStrength, v => v.toFixed(2));
   }
-  if (p.pcDenoisePixCell !== undefined || p.pcDenoiseRadius !== undefined) {
-    if (p.pcDenoisePixCell !== undefined) Settings.pcDenoisePixCell = p.pcDenoisePixCell;
-    if (p.pcDenoiseRadius  !== undefined) Settings.pcDenoiseRadius  = p.pcDenoiseRadius;
-    // The radius slider is a single 0..20 range whose value is BOTH the
-    // pixCell (px) and the 3-D radius (cm). wireSlider's onChange uses
-    // pixCell value as the slider raw value. So mirror pixCell here.
-    const v = p.pcDenoisePixCell ?? 0;
-    setSlider('pc-denoise-radius', 'pc-denoise-radius-lbl', v,
-              x => (x <= 0 ? '4 px / auto'
-                           : `${x|0} px (img) / ${(x/100).toFixed(2)} m (3D)`));
+  if (p.pcDenoiseWidthPx !== undefined) {
+    Settings.pcDenoiseWidthPx = p.pcDenoiseWidthPx;
+    setSlider('pc-denoise-width', 'pc-denoise-width-lbl', p.pcDenoiseWidthPx, v => `${v|0} px`);
   }
-  if (p.pcDenoiseSmoothPx !== undefined) {
-    Settings.pcDenoiseSmoothPx = p.pcDenoiseSmoothPx;
-    setSlider('pc-denoise-smooth', 'pc-denoise-smooth-lbl', p.pcDenoiseSmoothPx, v => `${v|0}`);
+  if (p.pcDenoiseCellPx !== undefined) {
+    Settings.pcDenoiseCellPx = p.pcDenoiseCellPx;
   }
 }
 
@@ -6802,32 +6774,40 @@ function bindControls() {
              v => { Settings.objMaskRadiusPx = v|0; rebuildAllStatic(); });
   wireSlider('max-scene-depth', 'max-scene-depth-lbl', v => `${v.toFixed(2)} m`,
              v => { Settings.maxSceneDepth = v;     rebuildAllStatic(); });
-  // Denoise sliders. Each change busts the cached mask by mutating the
-  // params; the keep-mask path re-runs computePcDenoiseMask via
-  // getPcDenoiseMask, which keys on the full param tuple.
-  wireSlider('pc-denoise-mink', 'pc-denoise-mink-lbl', v => `${v|0}`,
-             v => { Settings.pcDenoiseMinK = v|0;
-                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
-                    rebuildAllStatic(); });
+  // Denoise sliders: two knobs only. Each change busts the cached mask
+  // so the next rebuildAllStatic call re-runs getPcDenoiseMask with the
+  // new tuple.
   wireSlider('pc-denoise-edge', 'pc-denoise-edge-lbl', v => v.toFixed(2),
              v => { Settings.pcDenoiseEdgeStrength = v;
                     if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
                     rebuildAllStatic(); });
-  // Single slider drives BOTH backends' "neighbourhood size" knob:
-  //   * depth-edge backend reads it as the 2-D pixel-grid cell (px).
-  //   * PCA backend reads it as a 3-D radius (metres).
-  // A value of 0 means "let each backend pick its default" (4 px / auto).
-  wireSlider('pc-denoise-radius', 'pc-denoise-radius-lbl',
-             v => (v <= 0 ? '4 px / auto'
-                          : `${v|0} px (img) / ${(v/100).toFixed(2)} m (3D)`),
-             v => { Settings.pcDenoisePixCell = (v <= 0 ? 4 : (v | 0));
-                    Settings.pcDenoiseRadius  = (v <= 0 ? 0 : v / 100);
+  wireSlider('pc-denoise-width', 'pc-denoise-width-lbl', v => `${v|0} px`,
+             v => { Settings.pcDenoiseWidthPx = v | 0;
                     if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
                     rebuildAllStatic(); });
-  wireSlider('pc-denoise-smooth', 'pc-denoise-smooth-lbl', v => `${v|0}`,
-             v => { Settings.pcDenoiseSmoothPx = v | 0;
-                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
-                    rebuildAllStatic(); });
+  // Debug button — render the edge-detector output to a canvas and
+  // open the PNG in a new tab so the user can visually verify what's
+  // being classified as an edge before it's applied to the PC. Uses
+  // the FULL original PC (clipData._pc.positions), not the post-
+  // filter subset, so the depth raster matches the pre-cut input.
+  const dbgBtn = document.getElementById('pc-denoise-debug');
+  if (dbgBtn) {
+    dbgBtn.onclick = () => {
+      if (!clipData || !clipData._pc) {
+        alert('No PC loaded yet.');
+        return;
+      }
+      const canvas = getPcEdgeDebugCanvas(clipData, clipData._pc.positions);
+      if (!canvas) { alert('Edge detector returned nothing — strength 0 + width 0 = filter disabled.'); return; }
+      // Hand off via a blob URL so the browser shows the PNG inline.
+      canvas.toBlob((blob) => {
+        if (!blob) { alert('Failed to encode debug canvas.'); return; }
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      }, 'image/png');
+    };
+  }
   wireSlider('obj-cloud-size', 'obj-cloud-size-lbl', v => v.toFixed(1),
              v => { Settings.objCloudPointPx = v;   rerenderAll(); });
   const tObjCloud = document.getElementById('t-object-cloud');
