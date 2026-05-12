@@ -394,11 +394,12 @@ footer a { color: #2563eb; text-decoration: none; }
   }
 }
 </script>
-<!-- jsPDF as UMD (loaded eagerly, not via the import map). The ESM build of
-     jsPDF bare-imports @babel/runtime which the browser can't resolve from the
-     import map, so we ship the self-contained UMD instead. Exposes
-     window.jspdf.jsPDF, used by Panel.capture(scale)'s sidebar wiring. -->
-<script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<!-- gif.js (animated GIF encoder). Self-hosted under static/vendor/ so the
+     blob worker is same-origin. Exposes window.GIF. Iteration 1 uses this
+     to record the dynamic playback of any 3D panel. -->
+<script src="static/vendor/gif.js"></script>
+<!-- jsPDF removed in iteration 1 — capture flow is now GIF-only, no
+     external CDN scripts at all (so the page boots even when offline). -->
 </head>
 <body>
 <div class="page">
@@ -517,13 +518,10 @@ footer a { color: #2563eb; text-decoration: none; }
     </div>
   </section>
 
-  <!-- Paper-figure panel — single static composite, no playback -->
-  <section class="row">
-    <div class="card panel-card big">
-      <div class="ttl"><span>③b 3D scene · paper figure (all frames at once, no playback)</span><span class="lg-tag">temporal gradient encodes time · denser raw with more jumpy points</span></div>
-      <div class="body"><canvas id="canvas-paper"></canvas></div>
-    </div>
-  </section>
+  <!-- Paper-figure panel removed in iteration 1. The canvas-paper id is kept
+       as a hidden element so the JS panel-array build (which queries by id)
+       doesn't blow up; nothing draws to it. -->
+  <canvas id="canvas-paper" style="display:none;"></canvas>
 
   <!-- Alternate-PC big panel: same combined view as ③, but the scene PC is
        sourced from a user-selectable frame (clip frame 0 vs full-video frame 0).
@@ -554,7 +552,7 @@ footer a { color: #2563eb; text-decoration: none; }
       <div class="body"><canvas id="canvas-pred"></canvas></div>
     </div>
     <div class="card panel-card">
-      <div class="ttl"><span>④c · GT + pred + error</span></div>
+      <div class="ttl"><span>④c · GT + pred</span></div>
       <div class="body"><canvas id="canvas-cmp"></canvas></div>
     </div>
   </section>
@@ -676,45 +674,25 @@ footer a { color: #2563eb; text-decoration: none; }
         <span class="summary-tag">trail / endpoint / bg</span>
       </summary>
       <div class="sb-body-inner">
-        <div class="fld">
-          <div class="lbl-row"><span>Palette presets</span></div>
-          <div class="palette-row" id="palette-row"></div>
-        </div>
-
-        <div class="color-row">
-          <input type="color" id="col-gt" value="#f0529c" title="GT trail NEW-end color (newest frame end of the gradient).">
-          <input type="color" id="col-gt-old" value="#ffffff" title="GT trail OLD-end color (oldest frame end of the gradient).">
-          <span class="cn">GT <span class="h" id="col-gt-h">#f0529c</span></span>
-          <input type="range" class="alpha" id="alpha-gt" min="0" max="1" step="0.02" value="0.98" title="GT trail opacity (0 = invisible, 1 = opaque).">
-          <span class="alpha-lbl" id="alpha-gt-lbl">0.98</span>
-        </div>
-        <div class="fld" style="margin-top:-2px;">
-          <div class="lbl-row"><span title="Multiplier on every RGB channel of the GT trail's gradient end-points before rendering. >1 saturates / brightens (channels clip to 1, washed-out tones read as more vivid). <1 dims toward black.">GT trail brightness</span><span class="v" id="gt-boost-lbl">1.00</span></div>
-          <input type="range" id="gt-boost" min="0.3" max="2.5" step="0.05" value="1.00">
-        </div>
-        <div class="color-row">
-          <input type="color" id="col-pred" value="#34d399" title="Pred trail NEW-end color (newest frame end of the gradient).">
-          <input type="color" id="col-pred-old" value="#ffffff" title="Pred trail OLD-end color (oldest frame end of the gradient).">
-          <span class="cn">Prediction <span class="h" id="col-pred-h">#34d399</span></span>
-          <input type="range" class="alpha" id="alpha-pred" min="0" max="1" step="0.02" value="0.98" title="Prediction trail opacity.">
-          <span class="alpha-lbl" id="alpha-pred-lbl">0.98</span>
-        </div>
-        <div class="fld" style="margin-top:-2px;">
-          <div class="lbl-row"><span title="Brightness boost (×) for the prediction trail's gradient end-points.">Pred trail brightness</span><span class="v" id="pred-boost-lbl">1.00</span></div>
-          <input type="range" id="pred-boost" min="0.3" max="2.5" step="0.05" value="1.00">
-        </div>
-        <div class="color-row">
-          <input type="color" id="col-raw" value="#ef4444" title="Raw track NEW-end color (newest frame end of the gradient).">
-          <input type="color" id="col-raw-old" value="#ffffff" title="Raw track OLD-end color (oldest frame end of the gradient).">
-          <span class="cn">Raw tracks <span class="h" id="col-raw-h">#ef4444</span></span>
-        </div>
-        <div class="fld" style="margin-top:-2px;">
-          <div class="lbl-row"><span title="Brightness boost (×) for the raw-track gradient end-points.">Raw track brightness</span><span class="v" id="raw-boost-lbl">1.00</span></div>
-          <input type="range" id="raw-boost" min="0.3" max="2.5" step="0.05" value="1.00">
-        </div>
-        <div class="toggle-grid" style="margin-top:6px;">
-          <button class="btn full on" id="t-arc-len-grad" title="Parametrise the per-track gradient by cumulative arc length (default ON) instead of by frame index. Slow-motion frames get a tight band of colour, fast-motion frames stretch it. Applies to GT / pred / raw trails (and their balls layer).">gradient by arc length</button>
-        </div>
+        <!-- Iteration 1: colors live in the time-gradient palette below.
+             Per-role color pickers (GT/Pred/Raw) and their boosts are
+             intentionally omitted; the LUT (viridis for GT/Raw, magma for
+             Pred) drives the trail color. Endpoint + bg + page bg pickers
+             stay so the user can still re-skin the canvas chrome. The
+             hidden inputs below keep JS callers (presets, save/load,
+             palette presets) from null-deref. -->
+        <input type="hidden" id="col-gt" value="#f0529c">
+        <input type="hidden" id="col-gt-old" value="#ffffff">
+        <input type="hidden" id="alpha-gt" value="0.98">
+        <input type="hidden" id="gt-boost" value="1.0">
+        <input type="hidden" id="col-pred" value="#34d399">
+        <input type="hidden" id="col-pred-old" value="#ffffff">
+        <input type="hidden" id="alpha-pred" value="0.98">
+        <input type="hidden" id="pred-boost" value="1.0">
+        <input type="hidden" id="col-raw" value="#ef4444">
+        <input type="hidden" id="col-raw-old" value="#ffffff">
+        <input type="hidden" id="raw-boost" value="1.0">
+        <input type="hidden" id="t-arc-len-grad" value="on">
         <div class="color-row">
           <input type="color" id="col-endpoint" value="#fde047" title="Bright accent for the start/end markers.">
           <span class="cn">Endpoint accent <span class="h" id="col-endpoint-h">#fde047</span></span>
@@ -722,8 +700,8 @@ footer a { color: #2563eb; text-decoration: none; }
           <span class="alpha-lbl" id="alpha-endpoint-lbl">1.00</span>
         </div>
         <div class="color-row">
-          <input type="color" id="col-bg" value="#555555" title="Background color for every 3D panel.">
-          <span class="cn">3D panel bg <span class="h" id="col-bg-h">#555555</span></span>
+          <input type="color" id="col-bg" value="#ffffff" title="Background color for every 3D panel.">
+          <span class="cn">3D panel bg <span class="h" id="col-bg-h">#ffffff</span></span>
         </div>
         <div class="color-row">
           <input type="color" id="col-page-top" value="#ffffff" title="Page background — top of the gradient.">
@@ -733,7 +711,8 @@ footer a { color: #2563eb; text-decoration: none; }
           <input type="color" id="col-page-bot" value="#f3f4f6" title="Page background — bottom of the gradient.">
           <span class="cn">Page bg (bottom) <span class="h" id="col-page-bot-h">#f3f4f6</span></span>
         </div>
-
+        <!-- Palette presets host (kept so any preset wiring code still finds it) -->
+        <div id="palette-row" style="display:none;"></div>
       </div>
     </details>
 
@@ -831,88 +810,45 @@ footer a { color: #2563eb; text-decoration: none; }
         <span class="summary-tag">balls · lines · trail length</span>
       </summary>
       <div class="sb-body-inner">
+        <!-- Iteration 1: only the four user-tunable knobs. Everything else
+             (ball stride, ball min/max ratio, trail length, smooth samples,
+             track smoothing) is held at its default in Settings; the JS
+             wireSlider calls no-op when the elements are absent. Hidden
+             inputs preserve the save/load config flow. -->
         <div class="fld">
           <div class="lbl-row"><span># trajectories</span><span class="v" id="n-keep-lbl">8</span></div>
           <input type="range" id="n-keep" min="1" max="200" step="1" value="8">
         </div>
         <div class="fld-grid">
           <div class="fld">
-            <div class="lbl-row"><span>Ball stride</span><span class="v" id="ball-stride-lbl">3</span></div>
-            <input type="range" id="ball-stride" min="1" max="10" step="1" value="3">
+            <div class="lbl-row"><span>Ball size</span><span class="v" id="ball-scale-lbl">0.5×</span></div>
+            <input type="range" id="ball-scale" min="0.1" max="3" step="0.05" value="0.5">
           </div>
           <div class="fld">
-            <div class="lbl-row"><span>Ball size</span><span class="v" id="ball-scale-lbl">1.0×</span></div>
-            <input type="range" id="ball-scale" min="0.1" max="3" step="0.05" value="1">
+            <div class="lbl-row"><span>Endpoint size</span><span class="v" id="endpoint-scale-lbl">1.0×</span></div>
+            <input type="range" id="endpoint-scale" min="1" max="3.5" step="0.05" value="1.0" title="Multiplier (× largest trail ball) for the start/end markers.">
           </div>
           <div class="fld">
-            <div class="lbl-row"><span>Endpoint size</span><span class="v" id="endpoint-scale-lbl">1.6×</span></div>
-            <input type="range" id="endpoint-scale" min="1" max="3.5" step="0.05" value="1.6" title="Multiplier (× largest trail ball) for the start/end markers.">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span>Line width</span><span class="v" id="line-scale-lbl">1.0×</span></div>
-            <input type="range" id="line-scale" min="0.1" max="3" step="0.05" value="1">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span title="Smallest ball as a fraction of the largest. 1.0 = uniform-size balls.">Ball min/max ratio</span><span class="v" id="ball-min-frac-lbl">0.48</span></div>
-            <input type="range" id="ball-min-frac" min="0.2" max="1.0" step="0.02" value="0.48">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span title="How many trailing frames are rendered behind the current playhead in the live big panel.">Trail length (frames)</span><span class="v" id="trail-len-lbl">12</span></div>
-            <input type="range" id="trail-len" min="2" max="40" step="1" value="12">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span title="Catmull–Rom samples per inter-frame interval. Higher = smoother curves but slower.">Smooth samples</span><span class="v" id="smooth-samples-lbl">8</span></div>
-            <input type="range" id="smooth-samples" min="2" max="20" step="1" value="8">
+            <div class="lbl-row"><span>Line width</span><span class="v" id="line-scale-lbl">2.0×</span></div>
+            <input type="range" id="line-scale" min="0.1" max="3" step="0.05" value="2.0">
           </div>
         </div>
-        <div class="fld" style="margin-top:10px;">
-          <div class="lbl-row"><span title="Symmetric moving-average kernel (in frames) applied to gt_3d / pred_3d / raw_3d. 1 = original (no smoothing); larger values denoise but flatten fast motion.">Track smoothing (kernel)</span><span class="v" id="track-smooth-lbl">1 (original)</span></div>
-          <input type="range" id="track-smooth" min="1" max="21" step="2" value="1">
-        </div>
+        <!-- Holdouts (kept at default; values match Settings constants) -->
+        <input type="hidden" id="ball-stride" value="3">
+        <input type="hidden" id="ball-min-frac" value="0.48">
+        <input type="hidden" id="trail-len" value="12">
+        <input type="hidden" id="smooth-samples" value="8">
+        <input type="hidden" id="track-smooth" value="1">
       </div>
     </details>
 
-    <!-- ④b Track selection ──────────────────────────────────────────── -->
-    <!-- Which tracks the renderer picks each frame: GT vs raw, count,
-         strategy. Pure data-side decisions — no styling. -->
-    <details class="sb-section">
-      <summary>
-        <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> Track selection
-        <span class="summary-tag">GT · raw · strategies</span>
-      </summary>
-      <div class="sb-body-inner">
-        <div class="fld">
-          <div class="lbl-row"><span>GT selection strategy</span></div>
-          <select class="btn" id="gt-strategy" title="How the auto-curated GT track set is chosen.">
-            <option value="smoothest" selected>Smoothest first (default)</option>
-            <option value="jumpiest">Jumpiest first</option>
-            <option value="random">Random</option>
-            <option value="uniform">Uniform spread (every Nth)</option>
-            <!-- 'spatial' (K-means in 2D image space, restricted to HOT3D's
-                 moving object) is injected at clip-load time when the
-                 bundle ships a gt3d binary; not shown for other bundles. -->
-          </select>
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span># raw tracks</span><span class="v" id="n-raw-lbl">18</span></div>
-          <input type="range" id="n-raw" min="0" max="60" step="1" value="18" title="How many raw cotracker tracks are rendered when the raw layer is on.">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Of the raw tracks, this many come from the top-jumpiest set (the rest are mixed across the jump-score distribution).">Jumpy fraction (mixed mode)</span><span class="v" id="n-raw-jumpy-lbl">5</span></div>
-          <input type="range" id="n-raw-jumpy" min="0" max="40" step="1" value="5">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span>Raw selection strategy</span></div>
-          <select class="btn" id="raw-strategy" title="How the auto-curated raw track set is chosen.">
-            <option value="mixed" selected>Mixed (cross-section + jumpy bias)</option>
-            <option value="jumpiest">Jumpiest only</option>
-            <option value="smoothest">Smoothest only</option>
-            <option value="random">Random</option>
-            <option value="uniform">Uniform spread (every Nth)</option>
-          </select>
-        </div>
-      </div>
-    </details>
+    <!-- ④b Track selection — iteration 1: always smoothest-first.
+         Selectors removed; raw count + jumpy fraction live as hidden
+         inputs so JS that probes them still finds default values. -->
+    <input type="hidden" id="gt-strategy" value="smoothest">
+    <input type="hidden" id="raw-strategy" value="smoothest">
+    <input type="hidden" id="n-raw" value="18">
+    <input type="hidden" id="n-raw-jumpy" value="5">
 
     <!-- ⑤ Point cloud ─────────────────────────────────────────────── -->
     <details class="sb-section">
@@ -921,129 +857,64 @@ footer a { color: #2563eb; text-decoration: none; }
         <span class="summary-tag">size · depth shade · object filter</span>
       </summary>
       <div class="sb-body-inner">
+        <!-- Iteration 1: two controls only. The remaining knobs live as
+             hidden inputs so JS handlers / save-load still see their
+             default values. -->
         <div class="fld">
           <div class="lbl-row"><span>PC point size</span><span class="v" id="pc-size-lbl">12.0</span></div>
           <input type="range" id="pc-size" min="1" max="30" step="0.5" value="12">
         </div>
         <div class="fld">
-          <div class="lbl-row"><span title="0 = no depth shading on the scene PC. Higher dims far-away points so the foreground reads.">PC depth shade</span><span class="v" id="pc-shade-lbl">0.00</span></div>
-          <input type="range" id="pc-shade" min="0" max="1.5" step="0.05" value="0">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="HOT3D-only: drop scene-PC points whose nearest anchor-frame 2D-track is closer than this many pixels (so MoGe-lifted object pixels disappear and only the GT object cloud represents the foreground).">Object mask radius (px)</span><span class="v" id="obj-mask-radius-lbl">30 px</span></div>
-          <input type="range" id="obj-mask-radius" min="0" max="200" step="1" value="30">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Drops scene-PC points whose camera-frame Z (metres) exceeds this — works on any bundle whose PC is in camera coords (HOT3D, DROID, etc.). HOT3D defaults to 0.85 m (tabletop divider). DROID defaults to 2.0 m (hides the back wall). Slide right to disable; slide left to peel the scene back.">Max scene depth (m)</span><span class="v" id="max-scene-depth-lbl">10.00 m</span></div>
+          <div class="lbl-row"><span title="Drops scene-PC points whose camera-frame Z (metres) exceeds this. HOT3D defaults to 0.85 m (tabletop divider). DROID defaults to 2.0 m (hides the back wall). Slide right to disable; slide left to peel the scene back.">Max scene depth (m)</span><span class="v" id="max-scene-depth-lbl">10.00 m</span></div>
           <input type="range" id="max-scene-depth" min="0.05" max="10.0" step="0.01" value="10">
         </div>
-        <div class="toggle-grid" style="margin-top:6px;">
-          <button class="btn full" id="t-object-cloud" title="Render gt_3d at the playhead as a colored Points cloud using pt_colors_rgb (HOT3D mode).">object cloud</button>
+        <!-- Denoise: radius-outlier + centroid-offset edge filter.
+             Algorithm in computePcDenoiseMask(). Both run in one
+             uniform-grid pass; result is cached on clipData. -->
+        <div class="fld" style="margin-top:10px;">
+          <div class="lbl-row"><span title="Drop a scene-PC point if it has fewer than this many neighbours within the local radius. 0 = off. Kills isolated MoGe/depth-lift floaters.">Denoise: min neighbours</span><span class="v" id="pc-denoise-mink-lbl">4</span></div>
+          <input type="range" id="pc-denoise-mink" min="0" max="40" step="1" value="4">
         </div>
         <div class="fld">
-          <div class="lbl-row"><span title="Disc size (CSS pixels) for the object cloud points. Higher = the surface cloud visually dominates over the trails behind it.">Object cloud size</span><span class="v" id="obj-cloud-size-lbl">14.0</span></div>
-          <input type="range" id="obj-cloud-size" min="2" max="40" step="0.5" value="14">
+          <div class="lbl-row"><span title="Edge-removal strength. 0 = no filter. 1 = maximally aggressive (drops anything with even a small depth jump across its image-space neighbourhood). The viewer picks the backend automatically: for clips with frame-0 camera intrinsics (HOT3D / EgoDex / HD-EPIC) the slider drives an image-domain depth-edge detector (project each point back to (u,v); drop if its 2-D pixel neighbours straddle a relative depth jump > tol). For clips without intrinsics (DROID, DAVIS) it falls back to PCA surface-variation. Default 0.7.">Denoise: edge sensitivity</span><span class="v" id="pc-denoise-edge-lbl">0.70</span></div>
+          <input type="range" id="pc-denoise-edge" min="0" max="1" step="0.02" value="0.70">
         </div>
         <div class="fld">
-          <div class="lbl-row"><span title="Object-cloud trail polyline opacity. High = trails occlude any ghost-cloud dots that fall behind them; low = trails recede as faint motion cues and ghosts bleed through.">Trail opacity</span><span class="v" id="obj-cloud-trail-opacity-lbl">0.95</span></div>
-          <input type="range" id="obj-cloud-trail-opacity" min="0" max="1" step="0.02" value="0.95">
-        </div>
-        <div class="toggle-grid" style="margin-top:6px;">
-          <button class="btn full on" id="t-object-cloud-trails" title="Per-track trail polylines for the object cloud, vertex-coloured pale→vivid by time.">object cloud trails</button>
-          <button class="btn full" id="t-object-cloud-trail-honor-vis" title="OFF (default): the trail uses GT mesh-pose positions through occluded frames so the polyline stays smooth across visibility gaps. ON: the trail breaks (cuts) at frames where the track is occluded — the legacy 'visible-only' look.">trail honors visibility</button>
-          <button class="btn full on" id="t-prediction-mode" title="ON (default): frame 0 of the moving object is drawn SOLID as the 'known input', every ghost frame and the playhead are drawn at ghost-opacity (the 'predicted future'), and the trail spans frame 0 → playhead regardless of trail-length. OFF: legacy mode — playhead is solid, ghost frames are ghost.">prediction mode</button>
+          <div class="lbl-row"><span title="Image-space pixel-grid cell size (depth-edge backend) or 3-D search radius (PCA fallback). Most users won't need this — leave at default 4 px / auto. Bump up if your scene has very sparse PC density.">Denoise: cell / radius</span><span class="v" id="pc-denoise-radius-lbl">4 px / auto</span></div>
+          <input type="range" id="pc-denoise-radius" min="0" max="20" step="1" value="4">
         </div>
         <div class="fld">
-          <div class="lbl-row"><span title="Number of object-cloud tracks to draw a trail polyline for. Tracks are sub-sampled evenly within the auto-detected moving object's surface points (HOT3D = the manipulated object). Drag up to the per-object track count to render every track of the moving object.">Trail # tracks</span><span class="v" id="obj-cloud-trail-count-lbl">256</span></div>
-          <input type="range" id="obj-cloud-trail-count" min="0" max="6000" step="1" value="256">
+          <div class="lbl-row"><span title="Morphological erosion (image-space) of the kept region after edge detection. Eats the saw-tooth comb pattern that the per-point edge test leaves along silhouettes — a kept point survives only if every image-space point within this many pixels was also kept. 0 disables. Default 8 px.">Denoise: edge smoothness (px)</span><span class="v" id="pc-denoise-smooth-lbl">8</span></div>
+          <input type="range" id="pc-denoise-smooth" min="0" max="24" step="1" value="8">
         </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Number of past frames each trail extends back from the current playhead.">Trail length (frames)</span><span class="v" id="obj-cloud-trail-len-lbl">20</span></div>
-          <input type="range" id="obj-cloud-trail-len" min="2" max="106" step="1" value="20">
-        </div>
-        <div class="color-row">
-          <input type="color" id="obj-cloud-trail-col" value="#34d399" title="Trail colour at the NEWEST end of the gradient (the playhead-side end of the trail).">
-          <span class="cn">Trail colour (newest)</span>
-        </div>
-        <div class="color-row">
-          <input type="color" id="obj-cloud-trail-col-old" value="#ffffff" title="Trail colour at the OLDEST end of the gradient (the far-back end of the trail).">
-          <span class="cn">Trail colour (oldest)</span>
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Trail-gradient floor. 0 = trail starts at the oldest colour at frame 0; higher values bias the whole trail toward the newest colour.">Trail gradient floor</span><span class="v" id="obj-cloud-trail-mixlo-lbl">0.18</span></div>
-          <input type="range" id="obj-cloud-trail-mixlo" min="0" max="0.95" step="0.02" value="0.18">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Trail-gradient curve exponent. <1 boosts the bright (newest) end; >1 stretches the pale (oldest) end.">Trail gradient curve</span><span class="v" id="obj-cloud-trail-exp-lbl">1.00</span></div>
-          <input type="range" id="obj-cloud-trail-exp" min="0.2" max="3" step="0.05" value="1">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Pixel width of the object-cloud trail polylines. Lower = thinner streaks so the cloud dominates.">Trail line width</span><span class="v" id="obj-cloud-trail-width-lbl">0.9</span></div>
-          <input type="range" id="obj-cloud-trail-width" min="0.3" max="8" step="0.1" value="0.9">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Multiplier on every RGB channel of the trail's gradient end-points before rendering. 1.0 = picker colours unchanged. >1 saturates / brightens (channels clip to 1, washed-out tones read as more vivid). <1 dims toward black.">Trail colour boost</span><span class="v" id="obj-cloud-trail-boost-lbl">1.00</span></div>
-          <input type="range" id="obj-cloud-trail-boost" min="0.3" max="2.5" step="0.05" value="1.00">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Hide tracks whose total motion (bbox diagonal across all frames) is below this threshold. In HOT3D — where one object moves and the others sit still — set this above the static-object jitter floor (~0.005 m) to surface only the moving object's tracks.">Min track motion (m)</span><span class="v" id="motion-min-lbl">0.000</span></div>
-          <input type="range" id="motion-min" min="0" max="0.5" step="0.001" value="0">
-        </div>
-        <div class="fld" style="margin-top:6px;">
-          <div class="lbl-row"><span title="Comma-separated frame indices to render the moving object cloud at as transparent ghosts. In prediction mode, frame 0 is ALWAYS drawn solid (the 'known input') and is automatically excluded from this ghost list — leave 42 here to ghost the mid-clip pose, or add more frames like '42, 80'.">Ghost frames</span></div>
-          <input type="text" id="ghost-frames" value="42"
-                 style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-family:monospace;font-size:.7rem;">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Per-ghost cloud opacity. 0 = invisible, 1 = same as live cloud.">Ghost opacity</span><span class="v" id="ghost-opacity-lbl">0.30</span></div>
-          <input type="range" id="ghost-opacity" min="0" max="1" step="0.02" value="0.30">
-        </div>
-        <div class="fld-grid">
-          <div class="fld">
-            <div class="lbl-row"><span title="Distance threshold (metres). A scene-PC point is kept only if it's within this distance of the object's tracked-point cloud at frame 0.">Object distance (m)</span><span class="v" id="obj-R-lbl">0.100</span></div>
-            <input type="range" id="obj-R" min="0.005" max="0.50" step="0.005" value="0.10">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span title="Context count. Each scene-PC point must have at least K tracked points within the distance threshold to be kept — higher K rejects lonely 'stray track' false positives.">Object context (K)</span><span class="v" id="obj-K-lbl">4</span></div>
-            <input type="range" id="obj-K" min="1" max="20" step="1" value="4">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span>Object dot</span><span class="v" id="obj-dot-lbl">2.5×</span></div>
-            <input type="range" id="obj-dot" min="0.5" max="6" step="0.1" value="2.5">
-          </div>
-        </div>
+        <!-- Holdouts -->
+        <input type="hidden" id="pc-shade" value="0">
+        <input type="hidden" id="obj-mask-radius" value="30">
+        <input type="hidden" id="obj-cloud-size" value="14">
+        <input type="hidden" id="obj-cloud-trail-opacity" value="0.95">
+        <input type="hidden" id="obj-cloud-trail-count" value="256">
+        <input type="hidden" id="obj-cloud-trail-len" value="20">
+        <input type="hidden" id="obj-cloud-trail-col" value="#34d399">
+        <input type="hidden" id="obj-cloud-trail-col-old" value="#ffffff">
+        <input type="hidden" id="obj-cloud-trail-mixlo" value="0.18">
+        <input type="hidden" id="obj-cloud-trail-exp" value="1">
+        <input type="hidden" id="obj-cloud-trail-width" value="0.9">
+        <input type="hidden" id="obj-cloud-trail-boost" value="1.0">
+        <input type="hidden" id="motion-min" value="0">
+        <input type="hidden" id="ghost-frames" value="42">
+        <input type="hidden" id="ghost-opacity" value="0.30">
+        <input type="hidden" id="obj-R" value="0.10">
+        <input type="hidden" id="obj-K" value="4">
+        <input type="hidden" id="obj-dot" value="2.5">
       </div>
     </details>
 
-    <!-- ⑤b Paper figure (static composite) ─────────────────────────── -->
-    <details class="sb-section">
-      <summary>
-        <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> Paper figure
-        <span class="summary-tag">static composite knobs</span>
-      </summary>
-      <div class="sb-body-inner">
-        <div class="fld">
-          <div class="lbl-row"><span title="Drop this many frames off the END of the GT trail in the paper-figure panel only — kills residual track noise at the tail.">GT tail drop (paper)</span><span class="v" id="paper-tail-lbl">9</span></div>
-          <input type="range" id="paper-tail" min="0" max="20" step="1" value="9">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Paper-mode gradient pale-floor — k(t) = MIX_LO + (1-MIX_LO)·t^EXP">Paper gradient floor</span><span class="v" id="paper-mix-lo-lbl">0.15</span></div>
-          <input type="range" id="paper-mix-lo" min="0" max="0.95" step="0.02" value="0.15">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Paper-mode gradient curve — lower = faster transition → smaller pale region.">Paper gradient curve</span><span class="v" id="paper-t-exp-lbl">0.30</span></div>
-          <input type="range" id="paper-t-exp" min="0.1" max="2" step="0.05" value="0.30">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Number of raw tracks in the paper figure — denser than live to make noise visible in a still.">Paper # raw tracks</span><span class="v" id="paper-n-raw-lbl">28</span></div>
-          <input type="range" id="paper-n-raw" min="0" max="80" step="1" value="28">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span># raw jumpy (paper)</span><span class="v" id="paper-n-raw-jumpy-lbl">14</span></div>
-          <input type="range" id="paper-n-raw-jumpy" min="0" max="60" step="1" value="14">
-        </div>
-      </div>
-    </details>
+    <!-- Paper figure section dropped in iteration 1. -->
+    <input type="hidden" id="paper-tail" value="9">
+    <input type="hidden" id="paper-mix-lo" value="0.15">
+    <input type="hidden" id="paper-t-exp" value="0.30">
+    <input type="hidden" id="paper-n-raw" value="28">
+    <input type="hidden" id="paper-n-raw-jumpy" value="14">
 
     <!-- ⑥ Layers — pure show/hide. Per-layer styling lives in the dedicated
          sections (Trajectory style, Point cloud, Camera). ─────────────── -->
@@ -1058,18 +929,14 @@ footer a { color: #2563eb; text-decoration: none; }
           <button class="btn on" id="t-gt">GT</button>
           <button class="btn on" id="t-pred">prediction</button>
           <button class="btn full" id="t-raw">raw tracks (unfiltered)</button>
-          <button class="btn full" id="t-err">GT↔Pred error vectors</button>
-          <button class="btn" id="t-balls">trajectory balls</button>
           <button class="btn" id="t-endpoints">endpoints</button>
         </div>
         <div class="lbl-row" style="font-size:.7rem;color:var(--text-muted);margin:10px 0 4px 0;">Scene layers</div>
         <div class="toggle-grid">
           <button class="btn on" id="t-pc">scene PC</button>
-          <button class="btn on" id="t-frustum">camera frustum</button>
         </div>
         <div class="lbl-row" style="font-size:.7rem;color:var(--text-muted);margin:10px 0 4px 0;">Scene PC editing</div>
         <div class="toggle-grid">
-          <button class="btn on" id="t-pc-click" title="Click any point in a 3D panel to hide it. Off = clicks orbit the camera only.">click to hide</button>
           <button class="btn" id="t-eraser" title="Hold-and-drag eraser. While ON, the cursor becomes a screen-space disc; mouse-down + drag hides every PC point under it. Orbit is suspended during the drag.">eraser</button>
           <button class="btn full" id="pc-hidden-reset" title="Restore every point hidden by clicks for the current clip.">↺ restore all hidden points (<span id="pc-hidden-count">0</span>)</button>
         </div>
@@ -1077,10 +944,14 @@ footer a { color: #2563eb; text-decoration: none; }
           <div class="lbl-row"><span title="Pixel radius of the eraser disc, measured in screen-space. Higher = wider strokes hide more points per drag.">Eraser size (px)</span><span class="v" id="eraser-size-lbl">30</span></div>
           <input type="range" id="eraser-size" min="4" max="200" step="1" value="30">
         </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="World-space ray tolerance for click-to-hide, expressed as a fraction of the scene spread. Smaller = stricter (only the literal nearest point under the cursor gets hidden); larger = forgiving but may hit nearby points.">Click radius (× spread)</span><span class="v" id="pc-click-radius-lbl">0.003</span></div>
-          <input type="range" id="pc-click-radius" min="0.0005" max="0.03" step="0.0005" value="0.003">
-        </div>
+        <!-- Iteration 1: hidden inputs for dropped toggles. The 'on' class
+             is the live state; setting it here matches the corresponding
+             Settings default so JS that reads .classList stays in sync. -->
+        <button id="t-err" style="display:none;"></button>
+        <button id="t-balls" style="display:none;"></button>
+        <button id="t-frustum" style="display:none;" class="on"></button>
+        <button id="t-pc-click" style="display:none;" class="on"></button>
+        <input type="hidden" id="pc-click-radius" value="0.003">
 
         <div class="lbl-row" style="font-size:.7rem;color:var(--text-muted);margin:14px 0 4px 0;">Ground grid</div>
         <div class="toggle-grid">
@@ -1149,57 +1020,19 @@ footer a { color: #2563eb; text-decoration: none; }
       </div>
     </details>
 
-    <!-- ⑥b Camera — frustum sizing + colour + viewer-camera reset.
-         All camera-scoped controls live here so the Layers grid is purely
-         about visibility. ───────────────────────────────────────────── -->
-    <details class="sb-section" open>
-      <summary>
-        <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> Camera
-        <span class="summary-tag">frustum · viewer reset</span>
-      </summary>
-      <div class="sb-body-inner">
-        <div class="toggle-grid" style="margin-bottom:10px;">
-          <button class="btn on" id="t-frustum-video" title="Project the live video frame onto the far rectangle of the frustum (mimics viz_website).">project video</button>
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Depth (in metres) of the wireframe pyramid drawn at the recording-camera centre. Lower = subtler frustum.">Frustum size (m)</span><span class="v" id="frustum-size-lbl">0.100</span></div>
-          <input type="range" id="frustum-size" min="0.005" max="0.80" step="0.005" value="0.10">
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="How many past camera frames are spline-rendered as the camera trail polyline.">Trail length (frames)</span><span class="v" id="frustum-trail-lbl">20</span></div>
-          <input type="range" id="frustum-trail" min="0" max="80" step="1" value="20">
-        </div>
-        <div class="fld-grid">
-          <div class="fld">
-            <div class="lbl-row"><span title="Pixel width of the frustum wireframe (LineMaterial — works on every platform, unlike LineBasicMaterial).">Frustum line width</span><span class="v" id="frustum-lw-lbl">2.5</span></div>
-            <input type="range" id="frustum-lw" min="0.5" max="8" step="0.1" value="2.5">
-          </div>
-          <div class="fld">
-            <div class="lbl-row"><span title="Pixel width of the camera-trail polyline.">Trail line width</span><span class="v" id="frustum-path-lw-lbl">1.8</span></div>
-            <input type="range" id="frustum-path-lw" min="0.5" max="8" step="0.1" value="1.8">
-          </div>
-        </div>
-        <div class="fld">
-          <div class="lbl-row"><span title="Symmetric moving-average kernel applied to camera positions and forwards. 1 = no smoothing; 5 is a good default.">Camera smoothing</span><span class="v" id="cam-smooth-lbl">5</span></div>
-          <input type="range" id="cam-smooth" min="1" max="21" step="2" value="5">
-        </div>
-        <div class="color-row">
-          <input type="color" id="frustum-col" value="#66aaff" title="Frustum wireframe colour.">
-          <span class="cn">Frustum colour</span>
-          <input type="range" class="alpha" id="alpha-frustum" min="0" max="1" step="0.02" value="0.85" title="Frustum opacity.">
-          <span class="alpha-lbl" id="alpha-frustum-lbl">0.85</span>
-        </div>
-        <div class="color-row">
-          <input type="color" id="frustum-path-col" value="#cccccc" title="Camera trail polyline colour.">
-          <span class="cn">Trail colour</span>
-          <input type="range" class="alpha" id="alpha-frustum-path" min="0" max="1" step="0.02" value="0.7" title="Trail polyline opacity.">
-          <span class="alpha-lbl" id="alpha-frustum-path-lbl">0.70</span>
-        </div>
-        <div class="toggle-grid" style="margin-top:10px;">
-          <button class="btn full" id="t-camera-reset" title="Reset the viewer camera (orbit/zoom) — does not affect the recording-camera frustum.">↻ Reset viewer camera</button>
-        </div>
-      </div>
-    </details>
+    <!-- Camera section dropped in iteration 1. Defaults live in Settings;
+         hidden inputs keep id-lookups from null-deref. -->
+    <input type="hidden" id="frustum-size" value="0.10">
+    <input type="hidden" id="frustum-trail" value="20">
+    <input type="hidden" id="frustum-lw" value="2.5">
+    <input type="hidden" id="frustum-path-lw" value="1.8">
+    <input type="hidden" id="cam-smooth" value="5">
+    <input type="hidden" id="frustum-col" value="#66aaff">
+    <input type="hidden" id="alpha-frustum" value="0.85">
+    <input type="hidden" id="frustum-path-col" value="#cccccc">
+    <input type="hidden" id="alpha-frustum-path" value="0.7">
+    <button id="t-frustum-video" style="display:none;" class="on"></button>
+    <button id="t-camera-reset" style="display:none;"></button>
 
     <!-- ⑦ Trajectory selection ───────────────────────────────────── -->
     <details class="sb-section">
@@ -1251,41 +1084,71 @@ footer a { color: #2563eb; text-decoration: none; }
       </div>
     </details>
 
-    <!-- Capture (hi-res screenshot) ─────────────────────────────── -->
+    <!-- Capture (animated GIF) — iteration 1 ─────────────────────────
+         Walks the clip frame-by-frame, captures the chosen 3D panel at
+         each frame, and encodes a looping GIF via gif.js (window.GIF).
+         Scale ≥ 2 explodes file size + encoding time, so we cap at 2×. -->
     <details class="sb-section">
       <summary>
         <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> Capture
-        <span class="summary-tag">4K / 8K PNG screenshot</span>
+        <span class="summary-tag">WebM (HQ) · GIF (compat)</span>
       </summary>
       <div class="sb-body-inner">
         <div class="fld">
           <div class="lbl-row"><span>Panel</span></div>
           <select id="cap-panel" style="width:100%;">
             <option value="canvas-all">③ Big interactive scene</option>
-            <option value="canvas-paper">③b Paper figure (static composite)</option>
             <option value="canvas-altpc">③c Alt-PC scene</option>
             <option value="canvas-gt">④a GT-only</option>
             <option value="canvas-pred">④b Pred-only</option>
-            <option value="canvas-cmp">④c GT+Pred+error</option>
+            <option value="canvas-cmp">④c GT+Pred</option>
             <option value="canvas-pcrgb">⑤ Initial object PC</option>
-            <option value="all">All panels (separate PNGs)</option>
           </select>
         </div>
         <div class="fld" style="margin-top:8px;">
-          <div class="lbl-row"><span>Scale</span></div>
-          <select id="cap-scale" style="width:100%;">
-            <option value="1">1× (current size)</option>
-            <option value="2">2×</option>
-            <option value="4" selected>4× (≈4K from a HD panel)</option>
-            <option value="8">8× (≈8K from a HD panel)</option>
+          <div class="lbl-row"><span title="Output format. WebM uses MediaRecorder + VP9 (full RGB, real video codec); GIF uses gif.js (256-color palette, dithered).">Format</span></div>
+          <select id="cap-format" style="width:100%;">
+            <option value="webm" selected>WebM (recommended — full RGB)</option>
+            <option value="gif">GIF (256 colors, universal)</option>
           </select>
         </div>
+        <div class="fld-grid" style="margin-top:8px;">
+          <div class="fld">
+            <div class="lbl-row"><span>Scale</span></div>
+            <select id="cap-scale" style="width:100%;">
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+            </select>
+          </div>
+          <div class="fld">
+            <div class="lbl-row"><span title="Output frames-per-second.">FPS</span></div>
+            <select id="cap-fps" style="width:100%;">
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="24">24</option>
+              <option value="30" selected>30</option>
+              <option value="60">60</option>
+            </select>
+          </div>
+        </div>
+        <div class="fld" style="margin-top:8px;">
+          <div class="lbl-row"><span title="Frame stride. 1 = capture every clip frame; 2 = every other; higher = smaller file.">Stride</span><span class="v" id="cap-stride-lbl">1</span></div>
+          <input type="range" id="cap-stride" min="1" max="6" step="1" value="1">
+        </div>
         <div class="toggle-grid" style="margin-top:10px;">
-          <button class="btn full" id="cap-go" title="Render the selected panel at the chosen scale and download a PDF (loss-less PNG embedded inside).">📄 Capture PDF</button>
+          <button class="btn full" id="cap-go" title="Record the full clip cycle of the chosen panel.">🎞 Capture</button>
+        </div>
+        <div class="fld" style="margin-top:8px;">
+          <div class="lbl-row"><span id="cap-progress-lbl" style="font-family:monospace;font-size:.7rem;color:var(--text-muted);">idle</span></div>
+          <div style="background:#e5e7eb;height:6px;border-radius:3px;overflow:hidden;">
+            <div id="cap-progress-bar" style="background:#0ea5e9;height:100%;width:0;transition:width .12s linear;"></div>
+          </div>
         </div>
         <div style="margin-top:6px;font-size:.7rem;color:var(--text-muted);font-family:monospace;">
-          Output: single-page PDF, page size = panel CSS box × scale (in pixels).
-          Camera + lighting + colormap state captured exactly as drawn.
+          WebM (default): full-RGB VP9 / VP8 — sharp gradients, smaller files.
+          GIF: universal browser viewer support, 256-color palette dithered.
+          Both step the playhead through the cut clip and supersample 2×.
         </div>
       </div>
     </details>
@@ -1414,8 +1277,8 @@ const Settings = {
   mixLo:      0.18,           // gradient pale floor (live mode); 0 = oldest is white, 1 = no gradient
   tExp:       1.00,           // gradient curve exponent (live mode); <1 boosts early frames
   ballStride: 3,              // place a ball every Nth frame
-  ballScale:  1.0,            // multiplier on per-panel ball radii
-  endpointScale: 1.6,         // multiplier on rMax for the start/end markers
+  ballScale:  0.5,            // multiplier on per-panel ball radii (iteration 1 default)
+  endpointScale: 1.0,         // multiplier on rMax for the start/end markers (iteration 1 default)
   endpointColor: '#fde047',   // bright accent for start/end (user-pickable; default vivid yellow)
   // Object-only PC filter (panel ⑤). For each scene-PC point we look at its
   // K-th nearest tracked point (at frame 0); we keep the scene PC point only
@@ -1435,7 +1298,7 @@ const Settings = {
   objectFilterR: 0.10,
   objectFilterK: 4,
   initialDotScale: 2.5,       // multiplier on rMax for the panel-⑤ tracked-point highlight spheres
-  lineScale:  1.0,            // multiplier on trail line widths
+  lineScale:  2.0,            // multiplier on trail line widths (iteration 1 default)
   nKeep:      8,              // # of GT/Pred trajectories rendered
   // Global colormap palette mode. ONE name applies to every gradient site
   // (GT / Pred / Raw / HOT3D object-cloud trails + the matching 2D overlays).
@@ -1446,7 +1309,7 @@ const Settings = {
   //   < 1 — lerp toward white (faint / washed-out trails)
   //   = 1 — pure LUT (matches the chip swatch in the sidebar)
   //   > 1 — multiply RGB and clamp (boosted / extra-vivid trails)
-  cmapPreset:    'magma',
+  cmapPreset:    'viridis',
   cmapReverse:   false,
   cmapIntensity: 1.0,
   // Hide GT in the 2D video / chrono overlays only (3D panels keep showing
@@ -1477,7 +1340,7 @@ const Settings = {
   // read as different perceptual palettes (e.g. GT=viridis, Pred=magma).
   // Default = same as the global so the legacy single-palette behaviour is
   // preserved until the user clicks a Pred-specific chip.
-  cmapPresetPred:  'viridis',
+  cmapPresetPred:  'magma',
   cmapReversePred: false,
 
   // ── Sampling & strategy (live-tunable) ──────────────────────────
@@ -1485,8 +1348,8 @@ const Settings = {
   smoothSamples:   8,    // catmull–rom samples per inter-frame interval
   nRawKeep:       18,    // raw tracks rendered when the raw layer is ON
   nRawJumpy:       5,    // of nRawKeep, this many forced-from-jumpiest pool
-  gtStrategy:  'smoothest',  // 'smoothest' | 'jumpiest' | 'random' | 'uniform'
-  rawStrategy: 'mixed',      // 'mixed' | 'jumpiest' | 'smoothest' | 'random' | 'uniform'
+  gtStrategy:  'smoothest',  // iteration 1: fixed to smoothest
+  rawStrategy: 'smoothest',  // iteration 1: fixed to smoothest
 
   // ── Paper figure (static composite) ─────────────────────────────
   paperGtTailDrop: 9,
@@ -1505,7 +1368,15 @@ const Settings = {
   // clipData._pcHidden (Set<number>) so every panel that shows the main
   // PC drops the same point. Object-only / extras / altPC panels ignore
   // clicks. Reset via the "Reset hidden PC" button in the Layers section.
-  pcClickHide:    true,
+  pcClickHide:    false,   // iteration 1: click-to-hide dropped; eraser is the only PC editor
+  // Scene-PC denoise. See computePcDenoiseMask_DepthEdge / fallback
+  // computePcDenoiseMask. edgeStrength is a single 0..1 knob the
+  // dispatcher maps to the backend-specific threshold; 0 = off.
+  pcDenoiseMinK:         4,      // drop point if it has < minK neighbours
+  pcDenoiseEdgeStrength: 0.7,    // 0 = no edge filter; 1 = maximally aggressive
+  pcDenoiseRadius:       0,      // PCA backend: 0 = auto from bbox diag × 0.020
+  pcDenoisePixCell:      4,      // depth-edge backend: pixel-grid cell size
+  pcDenoiseSmoothPx:     8,      // morphological erosion (px) along silhouettes; 0 = off
   pcClickRadius:  0.003,        // fraction of trajectory spread → world threshold
                                 // (smaller = only the literal nearest point gets hidden)
 
@@ -1659,7 +1530,7 @@ const Settings = {
   frustumPathOpacity: 0.7,
   frustumLineWidth: 2.5,        // px (LineMaterial uses CSS pixels)
   frustumPathLineWidth: 1.8,
-  showFrustum:    true,
+  showFrustum:    false,   // iteration 1: camera frustum dropped
   frustumSize:    0.10,         // depth (m) of the pyramid from camera origin
   frustumColor:   '#66aaff',    // wire colour (matches reference design)
   frustumPathColor: '#cccccc',  // recent-trail polyline colour
@@ -1673,7 +1544,7 @@ const ERR_COLOR = 0x6b7280; // soft gray
 const _COL_WHITE = new THREE.Color(0xffffff);
 
 // Background
-const BG_COLOR = 0x555555;   // 3D scene background — mid-grey (darker)
+const BG_COLOR = 0xffffff;   // 3D scene background — white (iteration 1 default)
 
 // ──────────── Shared camera state ────────────
 const camState = {
@@ -2269,6 +2140,520 @@ function polyToSegments(flat, into) {
   }
 }
 
+// ──────────── Scene-PC denoise ────────────
+// Two filters share a single neighbour pass; one of two backends runs
+// depending on whether the bundle has camera intrinsics:
+//
+//   * Backend A — Image-domain depth-edge detector. Each PC point was
+//     lifted from a pixel (u,v) via a known camera matrix, so we
+//     project every point back to (u,v), bucket into a 2-D pixel grid,
+//     and for each point compare its depth Z to the depth of its
+//     image-space neighbours. A relative depth jump
+//
+//         (max Z − min Z) / Z  >  edgeTolRel
+//
+//     means this point sits across a foreground/background boundary —
+//     i.e. it was lifted from an edge pixel and is one of those
+//     "fringe" outliers you see hanging off silhouettes. This is the
+//     point-cloud analogue of Sobel-on-depth-map, but it doesn't need
+//     a depth raster: we get the same answer from a 2-D pixel-space
+//     spatial hash. Runs whenever the bundle ships
+//     camera.intrinsics_frame0 (HOT3D / EgoDex / HD-EPIC).
+//
+//   * Backend B — PCA surface-variation fallback (Pauly et al. 2002),
+//     used when intrinsics are missing (DROID, DAVIS). Builds the local
+//     3×3 covariance from radius-neighbours and computes
+//     σ = λ_min / (λ1+λ2+λ3). Flat surface → σ ≈ 0; depth edge → σ
+//     inflates because the perpendicular eigenvalue picks up the depth
+//     jump. Eigenvalues come from a closed-form solver (Smith 1961).
+//
+// Density-outlier filter (drop if neighbour count < minK) runs in both
+// backends.
+//
+// Backend A is preferred — it's a directly interpretable threshold
+// ("don't lift across more than X% relative depth jump"), avoids the
+// 30-FLOP eigensolve per point, and exactly matches the user-visible
+// failure mode. Backend B kicks in only when there's no camera info.
+function getCamIntrinsicsFrame0(clipData) {
+  const cam = clipData?.camera;
+  if (!cam) return null;
+  const ipf = cam.intrinsics_per_frame;
+  if (Array.isArray(ipf) && ipf.length && Array.isArray(ipf[0]) && ipf[0].length >= 4) {
+    return { fx: ipf[0][0], fy: ipf[0][1], cx: ipf[0][2], cy: ipf[0][3] };
+  }
+  const if0 = cam.intrinsics_frame0;
+  if (Array.isArray(if0) && if0.length >= 4) {
+    return { fx: if0[0], fy: if0[1], cx: if0[2], cy: if0[3] };
+  }
+  return null;
+}
+
+// Backend A — image-domain depth-edge filter (the "lift across an
+// edge" detector). All work happens in pixel space; the only
+// floating-point math per point is the projection (1 div, 2 mul + 2
+// add) and the depth-range comparison.
+//
+//   minK         — drop if image-space neighbour count < minK
+//   edgeTolRel   — drop if (max Z − min Z) in the 3×3 cell ring around
+//                  the point's projected pixel exceeds `edgeTolRel × Z`
+//                  (i.e. relative depth jump). 1.0 disables; ~0.06 is a
+//                  reasonable default. Lower = more aggressive.
+//   pixCell      — pixel-grid cell size (default 4 px), so the 3×3 cell
+//                  search covers a 12 × 12-pixel neighbourhood.
+//   smoothPx     — morphological erosion radius applied to the kept
+//                  region in image space. After the per-point edge test,
+//                  a kept point P survives only if every image-space
+//                  point within `smoothPx` pixels was also kept;
+//                  otherwise P is dropped too. This eats the saw-tooth
+//                  comb pattern along silhouettes (where adjacent edge
+//                  pixels alternate kept / rejected). 0 disables.
+function computePcDenoiseMask_DepthEdge(positions, intr, opts) {
+  const N = positions.length / 3;
+  const minK       = Math.max(0, opts.minK | 0);
+  const edgeTolRel = (opts.edgeTolRel == null) ? 1.0 : +opts.edgeTolRel;
+  const pixCell    = Math.max(1, (opts.pixCell == null) ? 4 : (opts.pixCell | 0));
+  const smoothPx   = Math.max(0, (opts.smoothPx == null) ? 0 : +opts.smoothPx);
+  if (((minK <= 0) && (edgeTolRel >= 0.999) && smoothPx <= 0) || N === 0) return null;
+
+  const us = new Float32Array(N);
+  const vs = new Float32Array(N);
+  let umin =  Infinity, vmin =  Infinity;
+  let umax = -Infinity, vmax = -Infinity;
+
+  // ── Pass 1 — project every point to (u, v) image space. Two paths:
+  //   * Perspective (real intrinsics): u = fx·x/z + cx ; same for v.
+  //     Points with z ≤ 0 are flagged NaN and dropped.
+  //   * Orthographic (synthesized): u = (x − xmin)·scale ; same for v.
+  //     All points are kept regardless of z sign.
+  if (intr.ortho) {
+    const scale = intr.scale, xmin0 = intr.xmin, ymin0 = intr.ymin;
+    for (let i = 0; i < N; i++) {
+      const u = (positions[i*3]   - xmin0) * scale;
+      const v = (positions[i*3+1] - ymin0) * scale;
+      us[i] = u; vs[i] = v;
+      if (u < umin) umin = u; if (u > umax) umax = u;
+      if (v < vmin) vmin = v; if (v > vmax) vmax = v;
+    }
+  } else {
+    const fx = intr.fx, fy = intr.fy, cx = intr.cx, cy = intr.cy;
+    for (let i = 0; i < N; i++) {
+      const z = positions[i*3 + 2];
+      if (!(z > 1e-6)) { us[i] = NaN; vs[i] = NaN; continue; }
+      const u = fx * positions[i*3]   / z + cx;
+      const v = fy * positions[i*3+1] / z + cy;
+      us[i] = u; vs[i] = v;
+      if (u < umin) umin = u; if (u > umax) umax = u;
+      if (v < vmin) vmin = v; if (v > vmax) vmax = v;
+    }
+  }
+
+  // Grid dims.
+  const W = Math.max(1, Math.ceil((umax - umin) / pixCell) + 1);
+  const H = Math.max(1, Math.ceil((vmax - vmin) / pixCell) + 1);
+  const numCells = W * H;
+
+  // ── Pass 2 — counting-sort points into cells using a flat
+  // TypedArray "atomic bucket" layout. Much cheaper than
+  // Map<number, number[]> because every probe is a contiguous array
+  // read (good cache behaviour and no V8 megamorphic hash lookup).
+  //
+  //   cellOfPoint[i] = cell index that point i belongs to (−1 for
+  //                    points skipped because z <= 0)
+  //   cellStart[c]   = first index in sortedIdx that belongs to cell c
+  //   sortedIdx[…]   = point indices, contiguous per cell
+  //
+  // We allocate ONE Int32Array of length N for cellOfPoint and one
+  // Uint32Array of length numCells+1 for cellStart. With N up to 200k
+  // and numCells typically ~15k–30k for a 480-px image at pixCell=4,
+  // total grid allocation is a few hundred KB.
+  const cellOfPoint = new Int32Array(N);
+  const cellCount   = new Uint32Array(numCells);
+  for (let i = 0; i < N; i++) {
+    const u = us[i];
+    if (u !== u) { cellOfPoint[i] = -1; continue; }      // NaN check (faster than Number.isNaN)
+    const cu = ((u - umin) / pixCell) | 0;
+    const cv = ((vs[i] - vmin) / pixCell) | 0;
+    const k  = cu + cv * W;
+    cellOfPoint[i] = k;
+    cellCount[k]++;
+  }
+  // Prefix-sum → cellStart.
+  const cellStart = new Uint32Array(numCells + 1);
+  let acc = 0;
+  for (let c = 0; c < numCells; c++) {
+    cellStart[c] = acc;
+    acc += cellCount[c];
+  }
+  cellStart[numCells] = acc;
+  // Scatter. Reuse cellCount as a running write-offset (saves an alloc).
+  const sortedIdx = new Uint32Array(acc);
+  const cellOff   = cellCount;   // alias
+  cellOff.fill(0);
+  for (let i = 0; i < N; i++) {
+    const k = cellOfPoint[i];
+    if (k < 0) continue;
+    sortedIdx[cellStart[k] + cellOff[k]++] = i;
+  }
+
+  // ── Pass 3 — edge test. Two independent criteria both contribute
+  // to rejection; both fire on the same neighbour scan so the cost is
+  // shared.
+  //
+  //   (a) Per-CELL depth range: catches cells that straddle a depth
+  //       jump even when no individual point's local ring saw it. A
+  //       cell is flagged bad if (zmax_c − zmin_c) / |zmean_c| exceeds
+  //       the relative-jump threshold. Computed once over the
+  //       cellMin / cellMax arrays before the per-point pass starts.
+  //
+  //   (b) Per-POINT depth range: original check — scans the SEARCH
+  //       ring around the point's bucket and tests the same relative
+  //       jump against the point's own Z. Search ring expanded from
+  //       3×3 → 5×5 cells (configurable) so genuine edges trigger on
+  //       more points and the bad-cell mask gets denser, leaving
+  //       fewer comb-tooth survivors for the closing pass to handle.
+  const searchRing = 2;   // 5×5 cells. Bump to 3 for 7×7 if needed.
+  const keep = new Uint8Array(N);
+  const edgeOn = (edgeTolRel < 0.999);
+
+  // (a) Per-cell aggregate. cellMin / cellMax track depth range; bad
+  // cells get flagged before the per-point loop runs.
+  const cellBadAgg = new Uint8Array(numCells);
+  if (edgeOn) {
+    const cellMin = new Float32Array(numCells);
+    const cellMax = new Float32Array(numCells);
+    const cellSumZ = new Float32Array(numCells);
+    const cellCnt  = new Uint32Array(numCells);
+    for (let c = 0; c < numCells; c++) { cellMin[c] = Infinity; cellMax[c] = -Infinity; }
+    for (let i = 0; i < N; i++) {
+      const k = cellOfPoint[i];
+      if (k < 0) continue;
+      const z = positions[i*3 + 2];
+      if (z < cellMin[k]) cellMin[k] = z;
+      if (z > cellMax[k]) cellMax[k] = z;
+      cellSumZ[k] += z;
+      cellCnt[k]++;
+    }
+    for (let c = 0; c < numCells; c++) {
+      if (cellCnt[c] < 2) continue;
+      const range = cellMax[c] - cellMin[c];
+      const mean  = cellSumZ[c] / cellCnt[c];
+      const denom = mean > 0.01 ? mean : (mean < -0.01 ? -mean : 0.01);
+      if (range / denom > edgeTolRel) cellBadAgg[c] = 1;
+    }
+  }
+
+  // (b) Per-point ring scan.
+  for (let i = 0; i < N; i++) {
+    const k = cellOfPoint[i];
+    if (k < 0) continue;
+    if (cellBadAgg[k]) continue;  // already-bad cell (criterion a)
+    const pz = positions[i*3 + 2];
+    const cv = (k / W) | 0;
+    const cu = k - cv * W;
+    let zmin = pz, zmax = pz, cnt = 0;
+    for (let dv = -searchRing; dv <= searchRing; dv++) {
+      const ccv = cv + dv;
+      if (ccv < 0 || ccv >= H) continue;
+      const rowBase = ccv * W;
+      for (let du = -searchRing; du <= searchRing; du++) {
+        const ccu = cu + du;
+        if (ccu < 0 || ccu >= W) continue;
+        const cellK = ccu + rowBase;
+        const start = cellStart[cellK];
+        const end   = cellStart[cellK + 1];
+        for (let bi = start; bi < end; bi++) {
+          const j = sortedIdx[bi];
+          if (j === i) continue;
+          const jz = positions[j*3 + 2];
+          if (jz < zmin) zmin = jz;
+          if (jz > zmax) zmax = jz;
+          cnt++;
+        }
+      }
+    }
+    if (cnt < minK) continue;
+    if (edgeOn) {
+      const denom = pz > 0.01 ? pz : (pz < -0.01 ? -pz : 0.01);
+      const relJump = (zmax - zmin) / denom;
+      if (relJump > edgeTolRel) continue;
+    }
+    keep[i] = 1;
+  }
+
+  // ── Pass 4 — binary cut with a SMOOTH boundary, via morphological
+  // closing of the bad-cell mask in pixel space. Two separable sweeps:
+  //
+  //   1. Dilate cellBad by smoothCells   — fills the comb-tooth gaps
+  //      between adjacent rejected cells along the silhouette.
+  //   2. Erode the result by smoothCells — shrinks the dilated region
+  //      back to roughly its original outline, so the dilation isn't
+  //      a net "eat into the surface".
+  //
+  // Net effect: the bad region keeps its overall size but its boundary
+  // gets smoothed (closing = shape completion). Points in the closed
+  // mask are dropped — same kind of binary cut as before, just with a
+  // clean outline instead of comb teeth.
+  //
+  // Both passes use a sliding-window life-counter, O(numCells · 1)
+  // each. The complement-trick for erosion: erode(X) = ¬dilate(¬X), so
+  // we can reuse exactly the same dilation routine.
+  if (smoothPx > 0) {
+    const smoothCells = Math.max(1, Math.ceil(smoothPx / pixCell));
+    const cellBad = new Uint8Array(numCells);
+    for (let i = 0; i < N; i++) {
+      const k = cellOfPoint[i];
+      if (k >= 0 && !keep[i]) cellBad[k] = 1;
+    }
+
+    // Separable box dilation of an 8-bit cell mask by `r` cells. The
+    // life counter expires after r+1 cells of "no bad seen", so a
+    // single bad cell propagates its 1 across r cells in each
+    // direction along the scan line.
+    const dilateMask = (src, r) => {
+      const dst = new Uint8Array(numCells);
+      const tmp = new Uint8Array(numCells);
+      // Horizontal
+      for (let v = 0; v < H; v++) {
+        const base = v * W;
+        let life = 0;
+        for (let u = 0; u < W; u++) {
+          if (src[base + u]) life = r + 1;
+          if (life > 0) { tmp[base + u] = 1; life--; }
+        }
+        life = 0;
+        for (let u = W - 1; u >= 0; u--) {
+          if (src[base + u]) life = r + 1;
+          if (life > 0) { tmp[base + u] = 1; life--; }
+        }
+      }
+      // Vertical
+      for (let u = 0; u < W; u++) {
+        let life = 0;
+        for (let v = 0; v < H; v++) {
+          const k = u + v * W;
+          if (tmp[k]) life = r + 1;
+          if (life > 0) { dst[k] = 1; life--; }
+        }
+        life = 0;
+        for (let v = H - 1; v >= 0; v--) {
+          const k = u + v * W;
+          if (tmp[k]) life = r + 1;
+          if (life > 0) { dst[k] = 1; life--; }
+        }
+      }
+      return dst;
+    };
+
+    // closing(X) = erode(dilate(X)) = ¬dilate(¬dilate(X))
+    const dilated = dilateMask(cellBad, smoothCells);
+    // Complement, dilate, complement → erosion.
+    const inv = new Uint8Array(numCells);
+    for (let c = 0; c < numCells; c++) inv[c] = dilated[c] ? 0 : 1;
+    const invDilated = dilateMask(inv, smoothCells);
+    const closed = new Uint8Array(numCells);
+    for (let c = 0; c < numCells; c++) closed[c] = invDilated[c] ? 0 : 1;
+
+    // Apply the closed mask: a kept point in a closed bad cell now
+    // becomes a rejected point. This drops the comb-tooth "good
+    // strips" between rejected stripes without expanding the bad
+    // region outward.
+    for (let i = 0; i < N; i++) {
+      if (keep[i] && closed[cellOfPoint[i]]) keep[i] = 0;
+    }
+  }
+
+  return keep;
+}
+
+function eig3sym(a, b, c, d, e, f) {
+  // Eigenvalues of [[a,b,c],[b,d,e],[c,e,f]] via Smith 1961. Closed form,
+  // numerically stable for the symmetric real case (always three real
+  // roots). Returns the three roots in unspecified order.
+  const p1 = b*b + c*c + e*e;
+  if (p1 < 1e-30) return [a, d, f];  // already diagonal
+  const q  = (a + d + f) / 3;
+  const p2 = (a-q)*(a-q) + (d-q)*(d-q) + (f-q)*(f-q) + 2*p1;
+  const p  = Math.sqrt(p2 / 6);
+  // B = (M − qI) / p ; det(B) / 2
+  const Ba = (a-q)/p, Bd = (d-q)/p, Bf = (f-q)/p;
+  const Bb = b/p,     Bc = c/p,     Be = e/p;
+  let r = (Ba*(Bd*Bf - Be*Be) - Bb*(Bb*Bf - Be*Bc) + Bc*(Bb*Be - Bd*Bc)) / 2;
+  if (r < -1) r = -1; else if (r > 1) r = 1;
+  const phi  = Math.acos(r) / 3;
+  const e1   = q + 2*p*Math.cos(phi);
+  const e3   = q + 2*p*Math.cos(phi + (2*Math.PI/3));
+  const e2   = 3*q - e1 - e3;
+  return [e1, e2, e3];
+}
+
+function computePcDenoiseMask(positions, opts) {
+  const N = positions.length / 3;
+  const minK           = Math.max(0, opts.minK | 0);
+  const surfaceVarTol  = (opts.surfaceVarTol == null) ? 1.0 : +opts.surfaceVarTol;
+  const radiusFrac     = (opts.radiusFrac == null) ? 0.020 : +opts.radiusFrac;
+  const off = (minK <= 0) && (surfaceVarTol >= 0.333);
+  if (off || N === 0) return null;
+
+  // Bbox + diagonal → auto radius.
+  let xmin= Infinity, ymin= Infinity, zmin= Infinity;
+  let xmax=-Infinity, ymax=-Infinity, zmax=-Infinity;
+  for (let i = 0; i < N; i++) {
+    const x = positions[i*3], y = positions[i*3+1], z = positions[i*3+2];
+    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+    if (z < zmin) zmin = z; if (z > zmax) zmax = z;
+  }
+  const dx = xmax-xmin, dy = ymax-ymin, dz = zmax-zmin;
+  const diag = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1;
+  const radius = (opts.radius && opts.radius > 0) ? +opts.radius
+                                                   : Math.max(1e-4, diag * radiusFrac);
+  const r2 = radius * radius;
+
+  // Uniform-grid bucket — cell = radius so each query needs only the
+  // 3³ surrounding cells.
+  const cell = radius;
+  const nx = Math.max(1, Math.ceil(dx / cell) + 1);
+  const ny = Math.max(1, Math.ceil(dy / cell) + 1);
+  const grid = new Map();
+  for (let i = 0; i < N; i++) {
+    const cx = ((positions[i*3]   - xmin) / cell) | 0;
+    const cy = ((positions[i*3+1] - ymin) / cell) | 0;
+    const cz = ((positions[i*3+2] - zmin) / cell) | 0;
+    const k  = cx + cy * nx + cz * nx * ny;
+    let bucket = grid.get(k);
+    if (!bucket) { bucket = []; grid.set(k, bucket); }
+    bucket.push(i);
+  }
+
+  const keep = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    const px = positions[i*3], py = positions[i*3+1], pz = positions[i*3+2];
+    const cx = ((px - xmin) / cell) | 0;
+    const cy = ((py - ymin) / cell) | 0;
+    const cz = ((pz - zmin) / cell) | 0;
+    // First and second moments accumulated over neighbours (the point P
+    // itself is excluded — including it would bias λ_min upward for
+    // every point, which would just rescale the threshold).
+    let cnt = 0;
+    let sx = 0, sy = 0, sz = 0;
+    let sxx= 0, sxy= 0, sxz= 0, syy= 0, syz= 0, szz= 0;
+    for (let ddx = -1; ddx <= 1; ddx++) {
+      const ccx = cx + ddx;  if (ccx < 0 || ccx >= nx) continue;
+      for (let ddy = -1; ddy <= 1; ddy++) {
+        const ccy = cy + ddy;  if (ccy < 0) continue;
+        for (let ddz = -1; ddz <= 1; ddz++) {
+          const ccz = cz + ddz;  if (ccz < 0) continue;
+          const bucket = grid.get(ccx + ccy * nx + ccz * nx * ny);
+          if (!bucket) continue;
+          for (let bi = 0; bi < bucket.length; bi++) {
+            const j = bucket[bi];
+            if (j === i) continue;
+            const jx = positions[j*3],   jy = positions[j*3+1], jz = positions[j*3+2];
+            const ex = jx - px, ey = jy - py, ez = jz - pz;
+            const d2 = ex*ex + ey*ey + ez*ez;
+            if (d2 > r2) continue;
+            cnt++;
+            sx += jx; sy += jy; sz += jz;
+            sxx+= jx*jx; sxy+= jx*jy; sxz+= jx*jz;
+            syy+= jy*jy; syz+= jy*jz; szz+= jz*jz;
+          }
+        }
+      }
+    }
+    if (cnt < minK) continue;                       // density outlier
+    // PCA surface variation. Needs ≥ 3 neighbours for a non-degenerate
+    // 3×3 covariance; with fewer the point is too sparse to judge —
+    // treat it as a noisy outlier and drop it (the minK guard above
+    // already covers minK ≥ 3).
+    if (surfaceVarTol < 0.333 && cnt >= 3) {
+      const invN = 1 / cnt;
+      const mx = sx * invN, my = sy * invN, mz = sz * invN;
+      const cxx = sxx * invN - mx*mx;
+      const cxy = sxy * invN - mx*my;
+      const cxz = sxz * invN - mx*mz;
+      const cyy = syy * invN - my*my;
+      const cyz = syz * invN - my*mz;
+      const czz = szz * invN - mz*mz;
+      const trace = cxx + cyy + czz;
+      if (trace > 1e-20) {
+        const ev = eig3sym(cxx, cxy, cxz, cyy, cyz, czz);
+        let lmin = ev[0];
+        if (ev[1] < lmin) lmin = ev[1];
+        if (ev[2] < lmin) lmin = ev[2];
+        if (lmin < 0) lmin = 0;   // numerical noise
+        const sigma = lmin / trace;
+        if (sigma > surfaceVarTol) continue;
+      }
+    }
+    keep[i] = 1;
+  }
+  return keep;
+}
+
+// Synthesize orthographic "intrinsics" from the PC's X / Y bounding-box
+// for clips that don't ship a real camera matrix (DROID, DAVIS). We treat
+// the PC's XY extent as a 480-pixel-wide synthetic image, so the image-
+// domain depth-edge backend can run on these clips too — same fast
+// algorithm, same cache layout, no PCA / eigensolve fallback needed.
+//
+// This works because for all currently-supported bundles the PC's
+// third axis IS depth (the existing maxSceneDepth slider already
+// depends on this for HOT3D / DROID / HD-EPIC). The XY axes aren't
+// perspective-projected pixel coords for DROID, but for depth-edge
+// detection we only need "points that are 2-D neighbours" — and points
+// that are close in (X, Y) ARE close on the source depth surface, so
+// the image-space depth-jump test still produces the right answer.
+function synthOrthoIntrinsics(positions) {
+  const N = positions.length / 3;
+  if (N === 0) return null;
+  let xmin =  Infinity, ymin =  Infinity;
+  let xmax = -Infinity, ymax = -Infinity;
+  for (let i = 0; i < N; i++) {
+    const x = positions[i*3], y = positions[i*3+1];
+    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+  }
+  const range = Math.max(xmax - xmin, ymax - ymin, 1e-6);
+  // 480 = match the dimension of the smallest real-intrinsics image
+  // (HD-EPIC video_dim_HW = 480×480). Keeps pixCell tuning portable.
+  const targetPx = 480;
+  const scale = targetPx / range;
+  return { ortho: true, scale, xmin, ymin };
+}
+
+// Dispatcher — runs the image-domain depth-edge backend in either
+// perspective mode (real frame-0 intrinsics) or orthographic mode
+// (synthesized from PC bbox). Returns a Uint8Array per-point keep
+// mask; the smoothPx pass cleans up the cut silhouette via
+// morphological closing, so the result is still a binary include
+// flag (1 = render the point, 0 = drop) but with a smooth boundary.
+function getPcDenoiseMask(clipData, positions, opts) {
+  if (!clipData) return null;
+  let intr = getCamIntrinsicsFrame0(clipData);
+  let mode = 'persp';
+  if (!intr) {
+    intr = synthOrthoIntrinsics(positions);
+    mode = 'ortho';
+  }
+  if (!intr) return null;
+  const s   = Math.max(0, Math.min(1, +opts.edgeStrength || 0));
+  const key = `${mode}|${opts.minK}|${s.toFixed(3)}|${opts.pixCell || 0}|${opts.smoothPx || 0}`;
+  if (clipData._pcDenoiseCacheKey === key && clipData._pcDenoiseMask !== undefined) {
+    return clipData._pcDenoiseMask;
+  }
+  // Strength 0 → tol 1.0 (off); strength 1 → tol 0.01 (≥1 % depth jump).
+  const edgeTolRel = (s <= 0) ? 1.0 : (0.6 - (0.6 - 0.01) * s);
+  const mask = computePcDenoiseMask_DepthEdge(positions, intr, {
+    minK:       opts.minK,
+    edgeTolRel: edgeTolRel,
+    pixCell:    opts.pixCell || 4,
+    smoothPx:   opts.smoothPx || 0,
+  });
+  clipData._pcDenoiseCacheKey = key;
+  clipData._pcDenoiseMask = mask;
+  return mask;
+}
+
 // ──────────── Panel: one 3D viewer ────────────
 class Panel {
   constructor(canvasId, opts) {
@@ -2298,6 +2683,13 @@ class Panel {
     // reads as a brightness gradient (oldest → dim, newest → vivid) along the
     // trail. The `color` field is just a fallback; vertexColors overrides it.
     const lw = this.opts.lineWidth;
+    // All trail / endpoint / scene-PC materials keep their depth state
+    // off — adding depthWrite to LineMaterial broke Line2 rendering on
+    // some drivers (lines reduced to scattered dots). The trail-vs-
+    // endpoint draw order is instead controlled by `renderOrder` on the
+    // endpoint InstancedMesh: see `_addEndpointSpheres` below, where
+    // the mesh gets renderOrder = -1 so trails (default renderOrder 0)
+    // always paint after, i.e. on top of, the endpoint spheres.
     this.lineMats = {
       gt:   new LineMaterial({ color: 0xffffff, vertexColors:true, linewidth: lw, transparent:true, opacity:0.98, depthTest:false, depthWrite:false, dashed:false }),
       pred: new LineMaterial({ color: 0xffffff, vertexColors:true, linewidth: lw, transparent:true, opacity:0.98, depthTest:false, depthWrite:false, dashed:true, dashSize:0.04, gapSize:0.025 }),
@@ -2702,8 +3094,17 @@ class Panel {
         const dist   = clipData._pcDist || null;
         const maskR  = (dist && Settings.objMaskRadiusPx > 0) ? Settings.objMaskRadiusPx : -1;
         const maxZ   = (Settings.maxSceneDepth > 0) ? Settings.maxSceneDepth : Infinity;
+        // Binary keep mask with a smooth-closed silhouette (see
+        // computePcDenoiseMask_DepthEdge pass 4).
+        const denoise = getPcDenoiseMask(clipData, positions, {
+          minK:          Settings.pcDenoiseMinK | 0,
+          edgeStrength:  Settings.pcDenoiseEdgeStrength,
+          radius:        Settings.pcDenoiseRadius || 0,
+          pixCell:       Settings.pcDenoisePixCell || 4,
+          smoothPx:      Settings.pcDenoiseSmoothPx || 0,
+        });
         const Nfull  = positions.length / 3;
-        const anyFilter = (hidden && hidden.size) || maskR > 0 || Number.isFinite(maxZ);
+        const anyFilter = (hidden && hidden.size) || maskR > 0 || Number.isFinite(maxZ) || !!denoise;
         if (anyFilter) {
           const keep = new Uint8Array(Nfull);
           let M = 0;
@@ -2711,6 +3112,7 @@ class Panel {
             if (hidden && hidden.has(i)) continue;
             if (maskR > 0 && dist[i] < maskR) continue;
             if (positions[i*3 + 2] > maxZ)    continue;
+            if (denoise && !denoise[i])       continue;
             keep[i] = 1; M++;
           }
           if (M > 0 && M !== Nfull) {
@@ -3213,6 +3615,14 @@ class Panel {
       this._endpointMat.opacity = Settings.endpointAlpha;
     }
     inst.material = this._endpointMat;
+    // renderOrder = -1 puts the endpoint draw BEFORE everything else in
+    // dynGroup (trails default to 0). With depthTest:false on both,
+    // the GPU's z-buffer is bypassed and the later-drawn object simply
+    // paints over the earlier — so trails end up on top of the yellow
+    // endpoint clusters even when the camera angle would have the
+    // endpoints visually nearer. Cheap, driver-portable, no Line2
+    // weirdness.
+    inst.renderOrder = -1;
     this.dynGroup.add(inst);
   }
 
@@ -4834,10 +5244,12 @@ async function init() {
   });
 
   panels = [
-    new Panel('canvas-all',  { showPC:true, showGT:true, showPred:true, showErrors:false, showRaw:false, lineWidth:TRAIL_LINE_PX_BIG }),
-    new Panel('canvas-gt',   { showPC:true, showGT:true,  showPred:false, showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
-    new Panel('canvas-pred', { showPC:true, showGT:false, showPred:true,  showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
-    new Panel('canvas-cmp',  { showPC:false, showGT:true, showPred:true, showErrors:true, showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
+    // Iteration 1: trajectory balls + error vectors are dropped — pass
+    // showBalls:false / showErrors:false on every panel that used to opt in.
+    new Panel('canvas-all',  { showPC:true, showGT:true, showPred:true, showErrors:false, showBalls:false, showRaw:false, lineWidth:TRAIL_LINE_PX_BIG }),
+    new Panel('canvas-gt',   { showPC:true, showGT:true,  showPred:false, showBalls:false, showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
+    new Panel('canvas-pred', { showPC:true, showGT:false, showPred:true,  showBalls:false, showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
+    new Panel('canvas-cmp',  { showPC:false, showGT:true, showPred:true, showErrors:false, showBalls:false, showRaw:false, lineWidth:TRAIL_LINE_PX_SM }),
     // Initial-position panel (⑤): dense object-only PC at frame 0 (scene PC
     // filtered via the strict K-th-NN-within-R rule + object-RGB highlight
     // dots at every tracked point so the manipulated object pops even when
@@ -4847,10 +5259,9 @@ async function init() {
     // no playhead following. firstFrameMovingCloud=true bypasses the
     // big-panel gate that the regular full-clip cloud path uses.
     new Panel('canvas-pcrgb',{ showPC:false, objectPCOnly:false, showGT:false, showPred:false, showErrors:false, showBalls:false, showEndpoints:false, showInitialDots:false, showRaw:false, firstFrameMovingCloud:true, lineWidth:TRAIL_LINE_PX_SM }),
-    // Paper-figure panel: static composite of every frame at once (no
-    // playback). Always shows raw + filtered, with the temporal gradient
-    // standing in for time.
-    new Panel('canvas-paper',{ showPC:true, showGT:true, showPred:true, showErrors:false, showRaw:true, paperMode:true, lineWidth:TRAIL_LINE_PX_BIG }),
+    // Iteration 1: canvas-paper is dropped from the panel array — its
+    // <canvas> stays in the DOM as a hidden placeholder so other JS that
+    // does `document.getElementById('canvas-paper')` survives.
   ];
   // ③c · paper-figure panel for the FULL video. Static composite — every
   // tracked point's full-video trajectory drawn at once, scene PC sourced
@@ -6302,6 +6713,32 @@ function bindControls() {
              v => { Settings.objMaskRadiusPx = v|0; rebuildAllStatic(); });
   wireSlider('max-scene-depth', 'max-scene-depth-lbl', v => `${v.toFixed(2)} m`,
              v => { Settings.maxSceneDepth = v;     rebuildAllStatic(); });
+  // Denoise sliders. Each change busts the cached mask by mutating the
+  // params; the keep-mask path re-runs computePcDenoiseMask via
+  // getPcDenoiseMask, which keys on the full param tuple.
+  wireSlider('pc-denoise-mink', 'pc-denoise-mink-lbl', v => `${v|0}`,
+             v => { Settings.pcDenoiseMinK = v|0;
+                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
+                    rebuildAllStatic(); });
+  wireSlider('pc-denoise-edge', 'pc-denoise-edge-lbl', v => v.toFixed(2),
+             v => { Settings.pcDenoiseEdgeStrength = v;
+                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
+                    rebuildAllStatic(); });
+  // Single slider drives BOTH backends' "neighbourhood size" knob:
+  //   * depth-edge backend reads it as the 2-D pixel-grid cell (px).
+  //   * PCA backend reads it as a 3-D radius (metres).
+  // A value of 0 means "let each backend pick its default" (4 px / auto).
+  wireSlider('pc-denoise-radius', 'pc-denoise-radius-lbl',
+             v => (v <= 0 ? '4 px / auto'
+                          : `${v|0} px (img) / ${(v/100).toFixed(2)} m (3D)`),
+             v => { Settings.pcDenoisePixCell = (v <= 0 ? 4 : (v | 0));
+                    Settings.pcDenoiseRadius  = (v <= 0 ? 0 : v / 100);
+                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
+                    rebuildAllStatic(); });
+  wireSlider('pc-denoise-smooth', 'pc-denoise-smooth-lbl', v => `${v|0}`,
+             v => { Settings.pcDenoiseSmoothPx = v | 0;
+                    if (clipData) { clipData._pcDenoiseCacheKey = null; clipData._pcDenoiseMask = undefined; }
+                    rebuildAllStatic(); });
   wireSlider('obj-cloud-size', 'obj-cloud-size-lbl', v => v.toFixed(1),
              v => { Settings.objCloudPointPx = v;   rerenderAll(); });
   const tObjCloud = document.getElementById('t-object-cloud');
@@ -6575,66 +7012,280 @@ function bindControls() {
     };
   }
 
-  // Hi-res capture wiring. Resolves the chosen panel by canvas id, calls
-  // Hi-res capture wiring. Each panel renders into a scaled WebGL buffer,
-  // returns a PNG data URL, and we wrap it in a single-page PDF (page sized
-  // to the captured pixel dimensions) via jsPDF. PDF preserves the embedded
-  // PNG losslessly — same image quality as a direct PNG export, with the
-  // benefit that paper figures can drop the PDF straight into LaTeX
-  // \includegraphics. 'All panels' iterates every visible 3D canvas and
-  // downloads one PDF per panel.
+  // Animated GIF capture (iteration 1). Walks the playhead frame-by-frame
+  // across the cut clip, captures the chosen 3D panel each frame, and
+  // hands the snapshots to gif.js (window.GIF) for encoding. Self-hosted
+  // worker keeps everything same-origin. The seek-then-render-then-snap
+  // pattern below relies on the fact that the panel-render loop is
+  // already driven by `video.currentTime`, so once the seek lands and we
+  // wait two rAFs, the panel reflects the new frame.
   const findPanelByCanvas = (canvasId) => panels.find(p => p?.canvas?.id === canvasId);
-  const captureToPdf = async (panel, scale, fileName) => {
-    const { dataUrl, width, height } = await panel.capture(scale);
-    // jsPDF arrives as the UMD global window.jspdf.jsPDF (loaded by a
-    // <script> in <head>). Page units default to mm; we use 'px' so the
-    // page exactly matches the captured raster (no resampling, no aspect-
-    // ratio drift). If the UMD failed to load we fall back to a PNG
-    // download so the user still gets a usable export.
-    const JsPDFCtor = window.jspdf?.jsPDF;
-    if (!JsPDFCtor) {
-      console.warn('jsPDF not loaded; falling back to PNG download');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = fileName.replace(/\.pdf$/, '.png');
-      document.body.appendChild(a); a.click(); a.remove();
-      return;
+
+  // Force the panel to draw the given source-frame index. Mirrors the
+  // tick() loop's `panel.updateDynamic(cfg, fi); panel.render()` pair —
+  // calling it directly here means we don't depend on rAF having fired
+  // since the last seek. paperMode / firstFrameMovingCloud panels skip
+  // updateDynamic (they're static composites), so the GIF for those
+  // panels will be a single repeated frame, which is expected.
+  function renderPanelAtFrame(panel, fi) {
+    if (!panel?.opts?.paperMode) {
+      panel.updateDynamic(cfg, fi);
     }
-    const pdf = new JsPDFCtor({
-      orientation: width >= height ? 'l' : 'p',
-      unit: 'px',
-      format: [width, height],
-      compress: true,
+    panel.render();
+  }
+
+  // Snap a single rendered frame of `panel` onto a fresh canvas at (W,H).
+  // We always supersample: render at 2× the requested scale via
+  // panel.capture(scale*2), then downsample with high-quality smoothing
+  // into the GIF frame canvas. This is the standard supersampling-AA
+  // recipe and produces much sharper trails / point clouds than reading
+  // the on-screen backing buffer directly (which is sized for CSS pixels,
+  // typically far smaller than the GIF output).
+  //
+  // The background is pre-filled with the current 3D-panel bg color so
+  // gif.js's quantiser never has to invent pixels at any transparent
+  // edges (which is one source of the "fuzzy halo" look on GIFs).
+  async function snapFrame(panel, scale, W, H) {
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    const ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const bg = (document.getElementById('col-bg')?.value) || '#ffffff';
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Always render at 2× the GIF scale; never read the live canvas
+    // directly (its backing-store size is usually too small to give a
+    // crisp downsample). For scale=1, this means the renderer runs at
+    // 2× CSS size; for scale=2, at 4× CSS size.
+    const ssaa = Math.max(2, scale * 2);
+    const { dataUrl } = await panel.capture(ssaa);
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload  = () => { ctx.drawImage(img, 0, 0, W, H); resolve(); };
+      img.onerror = reject;
+      img.src = dataUrl;
     });
-    pdf.addImage(dataUrl, 'PNG', 0, 0, width, height, undefined, 'FAST');
-    pdf.save(fileName);
+    return out;
+  }
+
+  // Seek the clip video to the integer source-frame `fi`, then wait for
+  // the seeked event (so the <video> texture, if any panel uses one,
+  // reflects the new frame). 250 ms safety bail covers Chrome's "seek
+  // ignored because target equals current" no-op.
+  function seekToSrcFrame(fi) {
+    const t = fi / App.fps;
+    return new Promise(resolve => {
+      const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
+      video.addEventListener('seeked', onSeeked);
+      // No-op the listener if currentTime is already at the target —
+      // setting to the same value doesn't fire seeked.
+      if (Math.abs(video.currentTime - t) < 1e-6) {
+        video.removeEventListener('seeked', onSeeked);
+        resolve();
+        return;
+      }
+      video.currentTime = t;
+      setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 250);
+    });
+  }
+
+  // Stride slider label — cheap inline since wireSlider's hooks below
+  // would only no-op for elements that don't drive Settings.
+  {
+    const sl = document.getElementById('cap-stride');
+    const lb = document.getElementById('cap-stride-lbl');
+    if (sl && lb) sl.oninput = e => { lb.textContent = `${e.target.value|0}`; };
+  }
+  const capGo       = document.getElementById('cap-go');
+  const capProgLbl  = document.getElementById('cap-progress-lbl');
+  const capProgBar  = document.getElementById('cap-progress-bar');
+  const setCapProg  = (msg, frac) => {
+    if (capProgLbl) capProgLbl.textContent = msg;
+    if (capProgBar) capProgBar.style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
   };
-  const capGo = document.getElementById('cap-go');
+  // Resolve the best WebM codec the browser supports. VP9 first
+  // (better quality at the same bitrate), VP8 fallback (older Safari),
+  // plain webm as a last resort.
+  function pickWebMMimeType() {
+    if (typeof MediaRecorder === 'undefined') return null;
+    const candidates = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+    ];
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return null;
+  }
+
+  // Common pre-flight: figure out frame range, output dims, and a
+  // reusable "draw rendered panel onto target canvas" helper. The
+  // target canvas is the one we either feed to gif.js or hand to
+  // MediaRecorder via captureStream.
+  async function runCaptureLoop({ panel, scale, fps, stride, fStart, fEnd, target, onFrame, onProgress }) {
+    const ctx = target.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const bg = (document.getElementById('col-bg')?.value) || '#ffffff';
+    const nFrames = Math.max(1, fEnd - fStart + 1);
+    const wasPaused = video.paused;
+    video.pause();
+    const prevLastFi = App._lastFi;
+    App._lastFi = -2;
+    let captured = 0;
+    for (let fi = fStart; fi <= fEnd; fi += stride) {
+      await seekToSrcFrame(fi);
+      renderPanelAtFrame(panel, fi);
+      await new Promise(r => requestAnimationFrame(r));
+      // Render the supersampled frame into the target canvas.
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, target.width, target.height);
+      const ssaa = Math.max(2, scale * 2);
+      const { dataUrl } = await panel.capture(ssaa);
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload  = () => { ctx.drawImage(img, 0, 0, target.width, target.height); resolve(); };
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+      captured++;
+      await onFrame(captured);
+      onProgress(captured / Math.ceil(nFrames / stride));
+    }
+    App._lastFi = prevLastFi;
+    if (!wasPaused) video.play().catch(() => {});
+    return captured;
+  }
+
   if (capGo) {
     capGo.onclick = async () => {
-      const which = document.getElementById('cap-panel')?.value || 'canvas-all';
-      const scale = +(document.getElementById('cap-scale')?.value || 4);
+      const which  = document.getElementById('cap-panel')?.value  || 'canvas-all';
+      const format = document.getElementById('cap-format')?.value || 'webm';
+      const scale  = Math.max(1, +(document.getElementById('cap-scale')?.value  || 1));
+      const fps    = Math.max(1, +(document.getElementById('cap-fps')?.value    || 30));
+      const stride = Math.max(1, +(document.getElementById('cap-stride')?.value || 1));
       const stem = (CLIP_URL.split('/').pop() || 'clip').replace(/\.json$/, '');
+      const panel = findPanelByCanvas(which);
+      if (!panel) { alert(`no panel with id ${which}`); return; }
+      if (format === 'gif' && !window.GIF) {
+        alert('gif.js failed to load — check static/vendor/gif.js is served.');
+        return;
+      }
       const orig = capGo.textContent;
-      capGo.textContent = '📄 Capturing…';
+      capGo.textContent = '🎞 Capturing…';
       capGo.disabled = true;
+
+      // Output dims: panel CSS box × scale. WebM handles bigger frames
+      // easily (real video codec) so we let the long edge go up to
+      // 2400 px; GIF stays at 1600 to keep LZW tractable.
+      const parent  = panel.canvas.parentElement;
+      const cssW    = parent?.clientWidth  || panel.canvas.width  || 600;
+      const cssH    = parent?.clientHeight || panel.canvas.height || 360;
+      const MAX_EDGE = (format === 'webm') ? 2400 : 1600;
+      const fit     = Math.min(1, MAX_EDGE / Math.max(cssW * scale, cssH * scale));
+      const outW    = (Math.max(2, Math.round(cssW * scale * fit))) & ~1;  // even (encoders prefer)
+      const outH    = (Math.max(2, Math.round(cssH * scale * fit))) & ~1;
+      const fStart  = App.clipStartFrame | 0;
+      const fEnd    = App.clipEndFrame   | 0;
+
       try {
-        if (which === 'all') {
-          for (const p of panels) {
-            if (!p?.canvas) continue;
-            // Skip panels whose card is currently hidden (e.g. card-altpc when
-            // there's no full-video bundle).
-            const card = p.canvas.closest('.panel-card');
-            if (card && card.offsetParent === null) continue;
-            await captureToPdf(p, scale, `${stem}_${p.canvas.id}_${scale}x.pdf`);
+        if (format === 'webm') {
+          const mime = pickWebMMimeType();
+          if (!mime) {
+            alert('MediaRecorder / WebM not supported in this browser — try GIF instead.');
+            return;
           }
+          // captureStream(0) = no auto-rate; we drive frames manually.
+          // Each frame we draw onto `target` plus a track.requestFrame()
+          // hands MediaRecorder exactly one video frame timestamped at
+          // wall-clock time. setTimeout pacing keeps the frame rate
+          // close to the requested fps. Bitrate is generous (12 Mbps)
+          // so VP9 doesn't introduce its own banding on the gradient
+          // trails.
+          const target = document.createElement('canvas');
+          target.width = outW; target.height = outH;
+          const stream = target.captureStream(0);
+          const track  = stream.getVideoTracks()[0];
+          const recorder = new MediaRecorder(stream, {
+            mimeType:              mime,
+            videoBitsPerSecond:    12_000_000,
+          });
+          const chunks = [];
+          recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+          recorder.start();
+          const frameMs = 1000 / fps;
+          await runCaptureLoop({
+            panel, scale, fps, stride, fStart, fEnd, target,
+            onFrame: async (n) => {
+              track.requestFrame();
+              // Pace so MediaRecorder timestamps space out evenly.
+              await new Promise(r => setTimeout(r, frameMs));
+            },
+            onProgress: p => setCapProg(`captured ${(p * 100).toFixed(0)}%`, p * 0.92),
+          });
+          setCapProg('finalising…', 0.95);
+          await new Promise(resolve => {
+            recorder.onstop = resolve;
+            recorder.stop();
+            stream.getTracks().forEach(t => t.stop());
+          });
+          const blob = new Blob(chunks, { type: mime.split(';')[0] });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${stem}_${which}_${scale}x_${fps}fps.webm`;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          setCapProg(`done · ${(blob.size / 1024).toFixed(0)} KB · ${outW}×${outH}`, 1);
         } else {
-          const p = findPanelByCanvas(which);
-          if (!p) throw new Error(`no panel with id ${which}`);
-          await captureToPdf(p, scale, `${stem}_${which}_${scale}x.pdf`);
+          // GIF path — same supersample pipeline, encoded via gif.js.
+          const gif = new window.GIF({
+            workers:      4,
+            quality:      1,
+            workerScript: 'static/vendor/gif.worker.js',
+            width:        outW,
+            height:       outH,
+            repeat:       0,
+            dither:       'FloydSteinberg-serpentine',
+            background:   (document.getElementById('col-bg')?.value) || '#ffffff',
+          });
+          const delayMs = Math.round(1000 / fps);
+          // Each capture-loop iteration draws into a transient canvas
+          // that gif.js holds onto, so we hand `target` to gif.js and
+          // let copy:true snapshot it.
+          const target = document.createElement('canvas');
+          target.width = outW; target.height = outH;
+          await runCaptureLoop({
+            panel, scale, fps, stride, fStart, fEnd, target,
+            onFrame: async () => {
+              gif.addFrame(target, { delay: delayMs, copy: true });
+            },
+            onProgress: p => setCapProg(`captured ${(p * 100).toFixed(0)}%`, p * 0.6),
+          });
+          await new Promise((resolve, reject) => {
+            gif.on('progress', p => setCapProg(`encoding ${(p * 100).toFixed(0)}%`,
+                                               0.6 + 0.4 * p));
+            gif.on('finished', (blob) => {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${stem}_${which}_${scale}x_${fps}fps.gif`;
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(() => URL.revokeObjectURL(url), 5000);
+              setCapProg(`done · ${(blob.size / 1024).toFixed(0)} KB · ${outW}×${outH}`, 1);
+              resolve();
+            });
+            gif.on('abort', () => reject(new Error('gif aborted')));
+            gif.render();
+          });
         }
       } catch (err) {
         console.error('capture failed:', err);
+        setCapProg('failed: ' + (err?.message || err), 0);
         alert('Capture failed: ' + (err?.message || err));
       } finally {
         capGo.textContent = orig;
