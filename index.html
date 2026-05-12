@@ -4871,6 +4871,92 @@ function precomputeSmoothCamera(clipData) {
 // rendering mode it wants (e.g. object cloud + no pred for HOT3D) without
 // baking that decision into the viewer source. Fields not recognized are
 // silently ignored — keeps the format forward-compatible.
+// Dataset-level defaults. The combined repo serves five datasets; each
+// one has its own scene geometry / depth scale / noise profile, so the
+// "right" denoise tuning differs. Detect from the URL stem and stamp
+// the matching values into both Settings and the corresponding sidebar
+// sliders. Called from init() before applyBundleViewerDefaults — a
+// bundle JSON's viewer_defaults block can still override anything here
+// per-clip.
+function detectDatasetFromUrl(url) {
+  const stem = (url.split('/').pop() || '').replace(/\.json$/, '');
+  if (/^hot3d_/i.test(stem))                                            return 'hot3d';
+  if (/^(AUTOLab|GuptaLab|PennPAL|CLVR|REAL)_/.test(stem))              return 'droid';
+  if (/^P\d{2}-\d{8}-\d{6}-\d+$/.test(stem))                            return 'hdepic';
+  if (/^(camel|flamingo|car-turn)_/.test(stem))                         return 'davis';
+  return 'egodex';                                                       // fallback
+}
+
+function applyDatasetDefaults(clipUrl) {
+  const dataset = detectDatasetFromUrl(clipUrl);
+  // Per-dataset preset map. Each entry's keys map onto Settings fields
+  // (and the slider id is derived by transforming the key). Only listed
+  // datasets get presets; everything else inherits the global defaults
+  // baked into the Settings object at the top of the file.
+  const presets = {
+    hot3d: {
+      pcDenoiseMinK:         8,
+      pcDenoiseEdgeStrength: 0.7,
+      pcDenoisePixCell:      2,    // 2 px (img)
+      pcDenoiseRadius:       0.02, // 0.02 m (3D fallback)
+      pcDenoiseSmoothPx:     2,
+    },
+    droid: {
+      maxSceneDepth:         3.0,
+      pcSize:                12.0,
+      pcDenoiseMinK:         1,
+      pcDenoiseEdgeStrength: 0.0,
+      pcDenoisePixCell:      6,
+      pcDenoiseRadius:       0.06,
+      pcDenoiseSmoothPx:     1,
+    },
+  };
+  const p = presets[dataset];
+  if (!p) return;
+
+  // Helper that mirrors Settings → slider value + label so the sidebar
+  // shows what's actually being applied. The label formatter for each
+  // slider matches whatever the corresponding wireSlider() call uses.
+  const setSlider = (id, lblId, v, fmt) => {
+    const el = document.getElementById(id);
+    if (el) el.value = String(v);
+    const lbl = document.getElementById(lblId);
+    if (lbl) lbl.textContent = fmt(v);
+  };
+
+  if (p.maxSceneDepth !== undefined) {
+    Settings.maxSceneDepth = p.maxSceneDepth;
+    setSlider('max-scene-depth', 'max-scene-depth-lbl', p.maxSceneDepth, v => `${v.toFixed(2)} m`);
+  }
+  if (p.pcSize !== undefined) {
+    Settings.pcSize = p.pcSize;
+    setSlider('pc-size', 'pc-size-lbl', p.pcSize, v => v.toFixed(1));
+  }
+  if (p.pcDenoiseMinK !== undefined) {
+    Settings.pcDenoiseMinK = p.pcDenoiseMinK;
+    setSlider('pc-denoise-mink', 'pc-denoise-mink-lbl', p.pcDenoiseMinK, v => `${v|0}`);
+  }
+  if (p.pcDenoiseEdgeStrength !== undefined) {
+    Settings.pcDenoiseEdgeStrength = p.pcDenoiseEdgeStrength;
+    setSlider('pc-denoise-edge', 'pc-denoise-edge-lbl', p.pcDenoiseEdgeStrength, v => v.toFixed(2));
+  }
+  if (p.pcDenoisePixCell !== undefined || p.pcDenoiseRadius !== undefined) {
+    if (p.pcDenoisePixCell !== undefined) Settings.pcDenoisePixCell = p.pcDenoisePixCell;
+    if (p.pcDenoiseRadius  !== undefined) Settings.pcDenoiseRadius  = p.pcDenoiseRadius;
+    // The radius slider is a single 0..20 range whose value is BOTH the
+    // pixCell (px) and the 3-D radius (cm). wireSlider's onChange uses
+    // pixCell value as the slider raw value. So mirror pixCell here.
+    const v = p.pcDenoisePixCell ?? 0;
+    setSlider('pc-denoise-radius', 'pc-denoise-radius-lbl', v,
+              x => (x <= 0 ? '4 px / auto'
+                           : `${x|0} px (img) / ${(x/100).toFixed(2)} m (3D)`));
+  }
+  if (p.pcDenoiseSmoothPx !== undefined) {
+    Settings.pcDenoiseSmoothPx = p.pcDenoiseSmoothPx;
+    setSlider('pc-denoise-smooth', 'pc-denoise-smooth-lbl', p.pcDenoiseSmoothPx, v => `${v|0}`);
+  }
+}
+
 function applyBundleViewerDefaults(clipData) {
   const vd = clipData?.viewer_defaults;
   if (!vd) return;
@@ -5034,6 +5120,9 @@ async function init() {
   }
   // Populate the per-clip object selector (only visible when there's >1 config).
   populateObjSelector(clipData, cfg);
+  // Dataset-level presets (HOT3D / DROID / …) first, so a per-clip
+  // viewer_defaults block can still override individual fields next.
+  applyDatasetDefaults(CLIP_URL);
   // Apply bundle viewer-defaults BEFORE precomputing camera + smoothing
   // so any defaults that affect those caches (e.g. trackSmoothWindow) take
   // effect on the first computation. The HOT3D bundle uses this to declare
