@@ -372,9 +372,9 @@ def main():
     ap.add_argument("--all-tracks-dir", default=ALL_TRACKS_DEFAULT)
     ap.add_argument("--target-height", type=int, default=480)
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--moge-stride", type=int, default=3,
-                    help="Pixel stride for the scene PC (3 → ~155k pre-mask "
-                         "at 1408². Lower = denser cloud, larger pc.bin).")
+    ap.add_argument("--moge-stride", type=int, default=1,
+                    help="Pixel stride for the scene PC (1 = every depth "
+                         "pixel; was 3 ⇒ ~155k pre-mask, 1 ⇒ ~1.4M).")
     ap.add_argument("--moge-resolution", type=int, default=9)
     ap.add_argument("--caption", default=None,
                     help="Bundle caption shown in the page header. "

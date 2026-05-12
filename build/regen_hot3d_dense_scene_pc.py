@@ -52,8 +52,8 @@ def main():
     ap.add_argument("--out-dir", required=True, type=Path,
                     help="motion-teaser-viz repo root (containing static/).")
     ap.add_argument("--name", default="hot3d_clip1995_clip1996")
-    ap.add_argument("--stride", type=int, default=3,
-                    help="Pixel stride. 3 → ~155k pts before mask; 4 → ~87k.")
+    ap.add_argument("--stride", type=int, default=1,
+                    help="Pixel stride. 1 = every depth pixel (was 3 → ~155k pts; 1 ⇒ ~1.4M pre-mask).")
     ap.add_argument("--moge-resolution", type=int, default=9)
     ap.add_argument("--depth-min", type=float, default=0.05)
     ap.add_argument("--depth-max", type=float, default=5.0)

@@ -272,8 +272,8 @@ def main():
                     help="vipe_results dir containing depth/pose/intrinsics/rgb subdirs")
     ap.add_argument("--video-stem", required=True,
                     help="Video stem (e.g. part4_pick_place_food_2372) — used to locate vipe artifacts")
-    ap.add_argument("--pc-subsample", type=int, default=3,
-                    help="Pixel stride when backprojecting depth (lower = denser; visual.py default = 2)")
+    ap.add_argument("--pc-subsample", type=int, default=1,
+                    help="Pixel stride when backprojecting depth (1 = every pixel; was 3)")
     ap.add_argument("--pc-n-frames", type=int, default=1,
                     help="How many depth frames to backproject and concatenate. "
                          "Default = 1 (frame 0 only) so the hand isn't ghosted into the PC. "

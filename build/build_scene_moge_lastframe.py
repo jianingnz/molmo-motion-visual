@@ -138,7 +138,7 @@ def main():
     ap.add_argument("--out-dir", default="/weka/prior-default/jianingz/home/visual/motion-teaser-viz/static/data")
     ap.add_argument("--name",    default="hot3d_clip1995_clip1996")
     ap.add_argument("--out-tag", default="lastframe")
-    ap.add_argument("--stride",  type=int, default=5)
+    ap.add_argument("--stride",  type=int, default=1)
     ap.add_argument("--moge-resolution", type=int, default=9)
     ap.add_argument("--depth-min", type=float, default=0.05)
     ap.add_argument("--depth-max", type=float, default=5.0)
