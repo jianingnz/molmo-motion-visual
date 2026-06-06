@@ -187,6 +187,25 @@ All produce: depth-backprojected scene PC (subsample=3 typical), per-frame
   Sidebar "Capture" section: panel selector + 1×/2×/4× (4K) / 8× (8K) scale +
   "All panels" mode that downloads one PNG per visible 3D panel.
 
+## Recent additions (2026-06-04) — unified training-data examples
+Added four **GT-only training-data** showcases built straight from the unified
+`molmo-motion-1m` release (`/weka/oe-training-default/jianingz/molmo-motion-1m`)
+via the new `build/prepare_unified.py`:
+- **EgoDex** `egodex_basic_pick_place_13417` (part2 · "put orange toy in blue bowl").
+- **MolmoSpaces** (sim pick-and-place, ProcTHOR): `molmospaces_white_mug`,
+  `molmospaces_blue_remote`. New `MolmoSpaces (sim)` optgroup.
+- **YouTube-VIS** `ytvis_parrots` ("two parrots playing with a toy" — both
+  objects merged into one view). New `YouTube-VIS` optgroup.
+
+These show the **ground-truth training tracks only** (no model prediction —
+`pred==gt`, pred layer hidden by default), overlaid on a stride-1
+depth-backprojected scene PC. 2D tracks are derived by projecting the 3D.
+
+**High-resolution PC pass**: HD-EPIC re-baked from 25.6 K → full 512² (262 K
+pts); DAVIS re-baked from 3–22 K → 854×480 (409 K pts). EgoDex / DROID /
+MolmoSpaces / YT-VIS already at native max. HOT3D left at its dense stride-3
+(~221 K) — full 1408² is impractical for the web viewer. See `problem.md`.
+
 ## Status
 Bundles deployed. Live demo on GitHub Pages. Ongoing tuning: paper-figure
 knobs, HOT3D spatial picks, ghost-frame composition.

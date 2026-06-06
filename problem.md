@@ -47,6 +47,55 @@ scripts and the full 17-clip DROID example set). Patched in: viz1's
 under the right `<optgroup>` — pattern-based dataset detection in the JS
 will pick it up automatically.
 
+## 2026-06-04 — adding examples from the unified `molmo-motion-1m` release
+**Symptom**: not a bug — record the non-obvious facts about the unified
+training-data release at `/weka/oe-training-default/jianingz/molmo-motion-1m`
+so future adds don't re-derive them. New builder: `build/prepare_unified.py`.
+**Gotchas verified empirically (trust reprojection over the release README)**:
+- **Camera pose is cam→world (c2w), NOT world→camera.** The top-level README
+  labels egodex/ytvis pose `data` as "world-to-camera", but projecting a 3D
+  track with `K @ inv(pose)` reproduces the released 2D *exactly* only when
+  `pose` is treated as **c2w**. Same for hepic (`pose/`) and molmospaces
+  (`cam_poses`). Backproject with `world = pose @ cam_pt`.
+- **3D track NPZ layout varies.** egodex `tracks/object/{id}_3d.npz` →
+  `points_3d (K,T,3)` flat array. ytvis/hepic `tracks/{id}_3d.npz` →
+  `points_3d` is a **0-d object array** wrapping `{obj_name: (K,T,3)}` (use
+  `.item()`). molmospaces lives entirely in `camera/{slug}.npz`
+  (`points_3d (T,K,3)` — T-first! — + `body_ids`, `cam_poses`, `intrinsics`,
+  `depth_frames`); the `tracks/*_3d.npz` are empty 0-d stubs.
+- **hepic shipped 2D ≠ 3D point set.** `_2d.npz tracks` is a single
+  AllTracker grid `(T,N,2)`; the 3D is a separate per-object dict. They do not
+  correspond. **Derive 2D by projecting 3D** through (pose, intrinsics) — this
+  is what `prepare_unified.py` does for ALL datasets, giving a 2D set aligned
+  1:1 with the 3D (needed for color sampling / chrono / overlay).
+- **Invisible points carry garbage 3D** (e.g. hepic `-20522`). Always gate on
+  the per-point per-frame visibility mask; emit `null` for invisible samples.
+  The viewer tolerates `null` (HOT3D sparse-stub path: `trailVisible` /
+  `pointMaxJumpScores` both guard `Number.isFinite`).
+- **This release is GT-only** (no model prediction). Bundles set
+  `pred_3d == gt_3d` + `viewer_defaults.showPred=false` to show training
+  tracks cleanly.
+- **Use the right conda env**: `gentraj` (has OpenEXR + cv2 + imageio_ffmpeg).
+**Prevent**: when adding more examples, run `build/prepare_unified.py
+--dataset <ds> --file <video_id> --clip-id <id>` (add `--objs all --merge` for
+multi-object scenes, `--max-frames N` to cap long motion ranges), then add one
+`<option>` to `index.html` under the right `<optgroup>`.
+
+## 2026-06-04 — "highest-resolution PC" rebake
+**Symptom**: HD-EPIC PCs were 25.6 K pts (built at 160×160), DAVIS PCs 3–22 K.
+**Fix**: HD-EPIC re-generated from unified hepic depth at full 512² (262 K pts,
+stride-1) via `prepare_unified.py` (PC + tracks together → guaranteed aligned).
+DAVIS re-baked to stride-1 854×480 (409 K pts) via `rebake_pc_stride1.py` after
+patching `camera.video_stem` + `pc_bin.frame_indices_original=[0]` into the
+legacy bundles (their PCs were "pre-baked from motion5-viz", no camera meta).
+Verified the vipe world frame == the DAVIS track frame (tracks fall inside the
+backprojected bbox) before swapping. EgoDex/DROID/molmospaces/ytvis already at
+native max (≈stride-1). HOT3D left at stride-3 (~221 K): full 1408² ≈ 2 M
+pts/clip is impractical for the web viewer and HOT3D is not part of this
+training release.
+**Prevent**: `prepare_unified.py` bakes at `--pc-subsample 1` by default;
+`rebake_pc_stride1.py` needs `camera.video_stem` + `pc_bin.frame_indices_original`.
+
 ### Template
 ```
 ## <YYYY-MM-DD> — short title

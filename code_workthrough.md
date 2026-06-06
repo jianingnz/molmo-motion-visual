@@ -28,6 +28,10 @@ molmo-motion-visual/
 │  ├─ regen_hot3d_dense_scene_pc.py
 │  ├─ regen_hot3d_dense_tracks.py
 │  ├─ extract_hires_frames.py  # paper-quality strip frames (EgoDex+HOT3D)
+│  ├─ prepare_unified.py        # NEW: build a bundle straight from the unified
+│  │                            #   molmo-motion-1m release (egodex / ytvis /
+│  │                            #   hepic / molmospaces). GT-only, stride-1 PC,
+│  │                            #   2D derived by projecting 3D. See below.
 │  └─ pick_best_clip.py
 ├─ static/
 │  ├─ data/                    # JSON + .bin per clip
@@ -246,6 +250,35 @@ Per-dataset specifics:
   the right `clip-NNNNNN_rgb.mp4` source frame at 1408×1408 (no re-encode).
   In-place patches the JSON to add `clip_frames_hires` /
   `full_video_frames_hires` arrays.
+
+## `prepare_unified.py` (unified molmo-motion-1m → bundle)
+Reads the unified release at `/weka/oe-training-default/jianingz/molmo-motion-1m`
+(`<dataset>/{annotations,tracks,camera,depth,videos}`) and emits the same
+bundle contract as the other build scripts. Used to add the EgoDex
+`egodex_basic_pick_place_13417`, MolmoSpaces (`molmospaces_white_mug`,
+`molmospaces_blue_remote`) and YT-VIS (`ytvis_parrots`) examples, and to
+re-bake the HD-EPIC clips at full 512².
+
+Pipeline per clip:
+1. `UnifiedClip` loads the `clips.json` entry (caption/fps/`clips_by_object`
+   motion ranges), normalizes 3D tracks to `{obj: (K,T,3)}` + visibility,
+   exposes c2w poses, per-frame intrinsics, per-frame depth, and BGR video
+   frames resized to depth resolution. Per-dataset quirks are documented in
+   `problem.md` (pose=c2w, 0-d object dicts, molmospaces T-first layout).
+2. `select_objects` picks the object(s) — default the single longest motion
+   range; `--objs all` for every tracked object.
+3. `build_config_for_object` slices the window, **derives gt_2d by projecting
+   gt_3d** through (pose, intrinsics), samples per-point colors from the clip's
+   first frame, and sets `pred==gt`.
+4. `--merge` concatenates multiple objects into one config (e.g. both parrots
+   in one view); `--max-frames N` caps long windows (HD-EPIC P06).
+5. Backprojects the clip-start depth at `--pc-subsample 1` → stride-1 scene PC
+   in world frame (aligned with the tracks), trims the mp4, builds the chrono
+   composite, writes JSON + `_pc.bin` + mp4 + `_chrono.jpg`, and emits
+   `viewer_defaults.showPred=false` (GT-only release).
+
+Dataset detection (`detectDatasetFromUrl`) recognizes `molmospaces_*` and
+`ytvis_*` ids; per-dataset denoise presets updated for the stride-1 re-bakes.
 
 ## Hi-res screenshot capture
 - `Panel.capture(scale)` (line ~2376) renders the panel into a backing

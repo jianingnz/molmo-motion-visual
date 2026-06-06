@@ -80,6 +80,48 @@ The viewer loads `static/data/clean_surface_1713_t10.json` by default; the
 header has a clip-selector dropdown for switching, or pass
 `?clip=static/data/<other>.json` directly.
 
+### Build from the unified `molmo-motion-1m` release (`prepare_unified.py`)
+
+To add examples straight from the unified training-data release at
+`/weka/oe-training-default/jianingz/molmo-motion-1m` (egodex / ytvis / hepic /
+molmospaces), use `build/prepare_unified.py`. It reads the release's
+`tracks` + `camera` + `depth` + `videos` directly, derives 2D by projecting
+the 3D, and bakes a **stride-1** (highest-resolution) scene point cloud. The
+release ships **ground-truth tracks only**, so bundles set `pred==gt` and hide
+the pred layer (`viewer_defaults.showPred=false`).
+
+```bash
+source /weka/prior-default/jianingz/home/anaconda3/etc/profile.d/conda.sh
+conda activate gentraj   # has OpenEXR + cv2 + imageio_ffmpeg
+
+# EgoDex
+python build/prepare_unified.py --dataset egodex \
+  --file part2_basic_pick_place_13417 --clip-id egodex_basic_pick_place_13417
+
+# MolmoSpaces (sim pick-and-place) — pick the exo-camera view
+python build/prepare_unified.py --dataset molmospaces \
+  --file pick_place_2cam_randomized__house_105__00000000__exo_camera_1 \
+  --clip-id molmospaces_white_mug
+
+# YT-VIS, both tracked objects merged into one view
+python build/prepare_unified.py --dataset ytvis --file 1a8bdc5842 \
+  --clip-id ytvis_parrots --objs all --merge --merge-name "two parrots"
+
+# HD-EPIC re-bake at full 512² (cap long motion ranges)
+python build/prepare_unified.py --dataset hepic \
+  --file 48790bae29b831cd-P06-20240510-100047-225 \
+  --clip-id P06-20240510-100047-225 --max-frames 45
+```
+
+Key flags: `--objs all` (every tracked object; default = single longest motion
+range) · `--merge` (concatenate objects into one config) · `--max-frames N`
+(cap window length) · `--pc-subsample` (depth stride; 1 = highest res, default).
+The `file` argument is the `"file"` field from
+`<dataset>/annotations/<dataset>_clips.json`. After building, add one
+`<option>` under the matching `<optgroup>` in `index.html`
+(`molmospaces_*` / `ytvis_*` ids get per-dataset denoise presets via
+`detectDatasetFromUrl`).
+
 ## Source clips used for the demo
 
 | clip id | source | description |

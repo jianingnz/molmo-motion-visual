@@ -418,6 +418,7 @@ footer a { color: #2563eb; text-decoration: none; }
             <option value="static/data/part4_pour_1027.json">part4_pour_1027 · pour silver bottle into brown cup</option>
             <option value="static/data/insert_remove_utensils_534_t185.json">insert_remove_utensils_534 · obj0 · t185 · pick up plastic cutlery (raw vs filter+smooth demo)</option>
             <option value="static/data/clean_surface_3603_t12.json">clean_surface_3603 · obj0 · t12</option>
+            <option value="static/data/egodex_basic_pick_place_13417.json">part2_basic_pick_place_13417 · put orange toy in blue bowl</option>
           </optgroup>
           <optgroup label="HD-EPIC">
             <option value="static/data/P05-20240427-145526-105.json">P05-20240427-145526-105 · pour soy sauce into pan</option>
@@ -454,6 +455,13 @@ footer a { color: #2563eb; text-decoration: none; }
             <option value="static/data/hot3d_clip002658_obj3_s038_e055.json">clip-002658 · obj 3 · frames 38–55 (single clip)</option>
             <option value="static/data/hot3d_clip003137_obj0_s055_e074.json">clip-003137 · obj 0 · frames 55–74 (single clip)</option>
             <option value="static/data/hot3d_clip002562_obj2_s008_e025.json">clip-002562 · obj 2 · frames 8–25 (single clip)</option>
+          </optgroup>
+          <optgroup label="MolmoSpaces (sim)">
+            <option value="static/data/molmospaces_white_mug.json">white ceramic mug → bowl · sim pick-and-place</option>
+            <option value="static/data/molmospaces_blue_remote.json">blue remote control → bowl · sim pick-and-place</option>
+          </optgroup>
+          <optgroup label="YouTube-VIS">
+            <option value="static/data/ytvis_parrots.json">two parrots playing with a toy</option>
           </optgroup>
         </select>
         <select class="btn" id="obj-sel" style="font-size:.72rem; display:none;" title="Tracked object — only shown when the clip has multiple"></select>
@@ -4980,6 +4988,8 @@ function detectDatasetFromUrl(url) {
   if (/^(AUTOLab|GuptaLab|PennPAL|CLVR|REAL)_/.test(stem))              return 'droid';
   if (/^P\d{2}-\d{8}-\d{6}-\d+$/.test(stem))                            return 'hdepic';
   if (/^(camel|flamingo|car-turn)_/.test(stem))                         return 'davis';
+  if (/^molmospaces_/i.test(stem))                                      return 'molmospaces';
+  if (/^ytvis_/i.test(stem))                                            return 'ytvis';
   return 'egodex';                                                       // fallback
 }
 
@@ -4998,11 +5008,13 @@ function applyDatasetDefaults(clipUrl) {
   // baked into the Settings object at the top of the file.
   // cellPx must be ≥ the dataset's build-time stride or the depth raster
   // is too sparse for stable normals. Build-time strides:
-  //   HOT3D   → 3 (regen_hot3d_dense_scene_pc.py / prepare_hot3d_singleclip)
-  //   DROID   → 1 (dense_pc_droid16.py / rebuild_pc_droid_dense.py)
-  //   EgoDex  → 1 (prepare_clip.py once re-baked from default 3)
-  //   HD-EPIC → 3 (prepare_clip.py; not yet re-baked)
-  //   DAVIS   → 3 (prepare_davis_singleclip.py)
+  //   HOT3D       → 3 (regen_hot3d_dense_scene_pc.py / prepare_hot3d_singleclip)
+  //   DROID       → 1 (dense_pc_droid16.py / rebuild_pc_droid_dense.py)
+  //   EgoDex      → 1 (prepare_clip.py / prepare_unified.py — stride-1)
+  //   HD-EPIC     → 1 (prepare_unified.py — re-baked at full 512², stride-1)
+  //   DAVIS       → 1 (rebake_pc_stride1.py — re-baked from stride-3)
+  //   MolmoSpaces → 1 (prepare_unified.py — sim depth 624×352, stride-1, clean)
+  //   YT-VIS      → 1 (prepare_unified.py — vipe depth 854×480, stride-1)
   const presets = {
     hot3d: {
       pcDenoiseEdgeStrength: 0.7,
@@ -5023,12 +5035,25 @@ function applyDatasetDefaults(clipUrl) {
     hdepic: {
       pcDenoiseEdgeStrength: 0.7,
       pcDenoiseWidthPx:      2,
-      pcDenoiseCellPx:       3,
+      pcDenoiseCellPx:       2,    // re-baked at full 512², stride-1
     },
     davis: {
       pcDenoiseEdgeStrength: 0.7,
       pcDenoiseWidthPx:      2,
-      pcDenoiseCellPx:       3,
+      pcDenoiseCellPx:       2,    // re-baked at stride-1
+    },
+    // Sim-rendered depth is geometrically clean (no MoGe/vipe edge noise),
+    // so denoise is light; cap far walls so the room PC stays compact.
+    molmospaces: {
+      maxSceneDepth:         4.0,
+      pcDenoiseEdgeStrength: 0.3,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       2,
+    },
+    ytvis: {
+      pcDenoiseEdgeStrength: 0.7,
+      pcDenoiseWidthPx:      2,
+      pcDenoiseCellPx:       2,
     },
   };
   const p = presets[dataset];
