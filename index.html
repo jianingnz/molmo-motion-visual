@@ -1173,14 +1173,16 @@ footer a { color: #2563eb; text-decoration: none; }
       </div>
     </details>
 
-    <!-- Capture (animated GIF) — iteration 1 ─────────────────────────
+    <!-- Capture (animated GIF / video) ────────────────────────────────
          Walks the clip frame-by-frame, captures the chosen 3D panel at
-         each frame, and encodes a looping GIF via gif.js (window.GIF).
-         Scale ≥ 2 explodes file size + encoding time, so we cap at 2×. -->
+         each frame. MP4 (H.264) and WebM (VP9) record a real full-RGB
+         video via MediaRecorder at a resolution-scaled high bitrate; GIF
+         encodes a looping 256-colour palette via gif.js (window.GIF).
+         Scale ≥ 2 explodes GIF file size + encoding time. -->
     <details class="sb-section">
       <summary>
         <svg class="chev" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3l6 5-6 5V3z"/></svg> Capture
-        <span class="summary-tag">WebM (HQ) · GIF (compat)</span>
+        <span class="summary-tag">MP4 · WebM (HQ) · GIF</span>
       </summary>
       <div class="sb-body-inner">
         <div class="fld">
@@ -1195,9 +1197,10 @@ footer a { color: #2563eb; text-decoration: none; }
           </select>
         </div>
         <div class="fld" style="margin-top:8px;">
-          <div class="lbl-row"><span title="Output format. WebM uses MediaRecorder + VP9 (full RGB, real video codec); GIF uses gif.js (256-color palette, dithered).">Format</span></div>
+          <div class="lbl-row"><span title="Output format. MP4 uses MediaRecorder + H.264 at the highest supported profile/bitrate (full RGB); WebM uses MediaRecorder + VP9 (full RGB); GIF uses gif.js (256-color palette, dithered).">Format</span></div>
           <select id="cap-format" style="width:100%;">
-            <option value="webm" selected>WebM (recommended — full RGB)</option>
+            <option value="mp4" selected>MP4 (H.264 — highest quality)</option>
+            <option value="webm">WebM (VP9 — full RGB)</option>
             <option value="gif">GIF (256 colors, universal)</option>
           </select>
         </div>
@@ -1208,6 +1211,7 @@ footer a { color: #2563eb; text-decoration: none; }
               <option value="1" selected>1×</option>
               <option value="2">2×</option>
               <option value="3">3×</option>
+              <option value="4">4× (max res)</option>
             </select>
           </div>
           <div class="fld">
@@ -1235,9 +1239,11 @@ footer a { color: #2563eb; text-decoration: none; }
           </div>
         </div>
         <div style="margin-top:6px;font-size:.7rem;color:var(--text-muted);font-family:monospace;">
-          WebM (default): full-RGB VP9 / VP8 — sharp gradients, smaller files.
-          GIF: universal browser viewer support, 256-color palette dithered.
-          Both step the playhead through the cut clip and supersample 2×.
+          MP4 (default): H.264 highest supported profile, resolution-scaled
+          bitrate (~0.4 bpp, ≥16 Mbps) — paper-quality, plays everywhere.
+          WebM: full-RGB VP9 / VP8. GIF: 256-color palette dithered.
+          All step the playhead through the cut clip and supersample 2×.
+          Needs a Chromium-based browser for MP4 (H.264 MediaRecorder).
         </div>
       </div>
     </details>
@@ -7374,6 +7380,28 @@ function bindControls() {
     return null;
   }
 
+  // Resolve the best MP4 / H.264 codec the browser's MediaRecorder
+  // supports. We prefer H.264 High profile at the highest level (best
+  // quality, plays everywhere) and walk down to plain 'video/mp4'.
+  // Chromium ≥130 and Safari expose these; older Chrome returns null and
+  // the caller tells the user to use WebM instead.
+  function pickMp4MimeType() {
+    if (typeof MediaRecorder === 'undefined') return null;
+    const candidates = [
+      'video/mp4;codecs=avc1.640034',   // H.264 High @ L5.2
+      'video/mp4;codecs=avc1.640033',   // H.264 High @ L5.1
+      'video/mp4;codecs=avc1.640028',   // H.264 High @ L4.0
+      'video/mp4;codecs=avc1.4D4028',   // H.264 Main @ L4.0
+      'video/mp4;codecs=avc1.42E01E',   // H.264 Baseline
+      'video/mp4;codecs=avc1',
+      'video/mp4',
+    ];
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return null;
+  }
+
   // Common pre-flight: figure out frame range, output dims, and a
   // reusable "draw rendered panel onto target canvas" helper. The
   // target canvas is the one we either feed to gif.js or hand to
@@ -7431,13 +7459,15 @@ function bindControls() {
       capGo.textContent = '🎞 Capturing…';
       capGo.disabled = true;
 
-      // Output dims: panel CSS box × scale. WebM handles bigger frames
-      // easily (real video codec) so we let the long edge go up to
-      // 2400 px; GIF stays at 1600 to keep LZW tractable.
+      // Output dims: panel CSS box × scale. Real video codecs (MP4/WebM)
+      // handle big frames easily, so we let the long edge go up to
+      // 3840 px (4K) for high-resolution exports; GIF stays at 1600 to
+      // keep LZW tractable.
+      const isVideo = (format === 'webm' || format === 'mp4');
       const parent  = panel.canvas.parentElement;
       const cssW    = parent?.clientWidth  || panel.canvas.width  || 600;
       const cssH    = parent?.clientHeight || panel.canvas.height || 360;
-      const MAX_EDGE = (format === 'webm') ? 2400 : 1600;
+      const MAX_EDGE = isVideo ? 3840 : 1600;
       const fit     = Math.min(1, MAX_EDGE / Math.max(cssW * scale, cssH * scale));
       const outW    = (Math.max(2, Math.round(cssW * scale * fit))) & ~1;  // even (encoders prefer)
       const outH    = (Math.max(2, Math.round(cssH * scale * fit))) & ~1;
@@ -7445,26 +7475,36 @@ function bindControls() {
       const fEnd    = App.clipEndFrame   | 0;
 
       try {
-        if (format === 'webm') {
-          const mime = pickWebMMimeType();
+        if (format === 'webm' || format === 'mp4') {
+          const mime = (format === 'mp4') ? pickMp4MimeType() : pickWebMMimeType();
           if (!mime) {
-            alert('MediaRecorder / WebM not supported in this browser — try GIF instead.');
+            alert(format === 'mp4'
+              ? 'MP4 / H.264 recording is not supported by this browser. '
+                + 'Use a Chromium-based browser (Chrome/Edge ≥130) or Safari, '
+                + 'or pick the WebM format instead.'
+              : 'MediaRecorder / WebM not supported in this browser — try MP4 or GIF instead.');
             return;
           }
+          // Resolution-scaled bitrate for "highest quality": ~0.4 bits per
+          // pixel-frame, floored at 16 Mbps and capped at 120 Mbps so a 4K
+          // export still gets enough bits to keep gradient trails free of
+          // codec banding, without runaway file sizes on tiny panels.
+          const bitrate = Math.min(
+            120_000_000,
+            Math.max(16_000_000, Math.round(outW * outH * fps * 0.4)));
+          const ext = (format === 'mp4') ? 'mp4' : 'webm';
           // captureStream(0) = no auto-rate; we drive frames manually.
           // Each frame we draw onto `target` plus a track.requestFrame()
           // hands MediaRecorder exactly one video frame timestamped at
           // wall-clock time. setTimeout pacing keeps the frame rate
-          // close to the requested fps. Bitrate is generous (12 Mbps)
-          // so VP9 doesn't introduce its own banding on the gradient
-          // trails.
+          // close to the requested fps.
           const target = document.createElement('canvas');
           target.width = outW; target.height = outH;
           const stream = target.captureStream(0);
           const track  = stream.getVideoTracks()[0];
           const recorder = new MediaRecorder(stream, {
             mimeType:              mime,
-            videoBitsPerSecond:    12_000_000,
+            videoBitsPerSecond:    bitrate,
           });
           const chunks = [];
           recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -7489,10 +7529,11 @@ function bindControls() {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `${stem}_${which}_${scale}x_${fps}fps.webm`;
+          a.download = `${stem}_${which}_${scale}x_${fps}fps.${ext}`;
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
-          setCapProg(`done · ${(blob.size / 1024).toFixed(0)} KB · ${outW}×${outH}`, 1);
+          setCapProg(`done · ${(blob.size / 1024).toFixed(0)} KB · ${outW}×${outH} · `
+                     + `${(bitrate / 1e6).toFixed(0)} Mbps`, 1);
         } else {
           // GIF path — same supersample pipeline, encoded via gif.js.
           const gif = new window.GIF({
