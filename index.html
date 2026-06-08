@@ -1206,9 +1206,9 @@ footer a { color: #2563eb; text-decoration: none; }
         </div>
         <div class="fld-grid" style="margin-top:8px;">
           <div class="fld">
-            <div class="lbl-row"><span>Scale</span></div>
+            <div class="lbl-row"><span title="For MP4/WebM: multiplier over the panel's exact on-screen pixels. 1× = pixel-identical to what you see (full Retina resolution); 2×–4× render even sharper. GIF uses it as a plain supersample.">Scale</span></div>
             <select id="cap-scale" style="width:100%;">
-              <option value="1" selected>1×</option>
+              <option value="1" selected>1× (exact screen)</option>
               <option value="2">2×</option>
               <option value="3">3×</option>
               <option value="4">4× (max res)</option>
@@ -1241,8 +1241,9 @@ footer a { color: #2563eb; text-decoration: none; }
         <div style="margin-top:6px;font-size:.7rem;color:var(--text-muted);font-family:monospace;">
           MP4 (default): H.264 highest supported profile, resolution-scaled
           bitrate (~0.4 bpp, ≥16 Mbps) — paper-quality, plays everywhere.
-          WebM: full-RGB VP9 / VP8. GIF: 256-color palette dithered.
-          All step the playhead through the cut clip and supersample 2×.
+          MP4/WebM are WYSIWYG: Scale 1× outputs the panel at its exact
+          on-screen pixels (full Retina res), 2×–4× render even sharper.
+          GIF: 256-color palette dithered, long edge ≤1600.
           Needs a Chromium-based browser for MP4 (H.264 MediaRecorder).
         </div>
       </div>
@@ -7406,7 +7407,7 @@ function bindControls() {
   // reusable "draw rendered panel onto target canvas" helper. The
   // target canvas is the one we either feed to gif.js or hand to
   // MediaRecorder via captureStream.
-  async function runCaptureLoop({ panel, scale, fps, stride, fStart, fEnd, target, onFrame, onProgress }) {
+  async function runCaptureLoop({ panel, scale, fps, stride, fStart, fEnd, target, onFrame, onProgress, ssaa }) {
     const ctx = target.getContext('2d');
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -7421,11 +7422,15 @@ function bindControls() {
       await seekToSrcFrame(fi);
       renderPanelAtFrame(panel, fi);
       await new Promise(r => requestAnimationFrame(r));
-      // Render the supersampled frame into the target canvas.
+      // Render the panel into the target canvas. `ssaa` is the internal
+      // render multiplier over the panel's CSS box; callers may pass an
+      // explicit value (video uses RENDER_PIXEL_RATIO so the frame is
+      // pixel-identical to the on-screen panel) or leave it null to derive
+      // 2× the requested scale (GIF).
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, target.width, target.height);
-      const ssaa = Math.max(2, scale * 2);
-      const { dataUrl } = await panel.capture(ssaa);
+      const ssaaEff = Math.max(1, ssaa || scale * 2);
+      const { dataUrl } = await panel.capture(ssaaEff);
       await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload  = () => { ctx.drawImage(img, 0, 0, target.width, target.height); resolve(); };
@@ -7459,18 +7464,32 @@ function bindControls() {
       capGo.textContent = '🎞 Capturing…';
       capGo.disabled = true;
 
-      // Output dims: panel CSS box × scale. Real video codecs (MP4/WebM)
-      // handle big frames easily, so we let the long edge go up to
-      // 3840 px (4K) for high-resolution exports; GIF stays at 1600 to
-      // keep LZW tractable.
+      // Output dims. MP4/WebM are WYSIWYG: we render at the EXACT pixel
+      // ratio the live panel uses on screen (RENDER_PIXEL_RATIO — 2.5 on a
+      // Retina Mac) so the file is pixel-identical to what you see, then
+      // multiply by the Scale knob (1× = exact screen, 2×+ = even sharper).
+      // Render 1:1 into the target (no downscale). The internal render long
+      // edge is clamped to a conservative WebGL texture budget (8192 px,
+      // safe on every GPU). GIF keeps the old palette-friendly ≤1600 path.
       const isVideo = (format === 'webm' || format === 'mp4');
       const parent  = panel.canvas.parentElement;
       const cssW    = parent?.clientWidth  || panel.canvas.width  || 600;
       const cssH    = parent?.clientHeight || panel.canvas.height || 360;
-      const MAX_EDGE = isVideo ? 3840 : 1600;
-      const fit     = Math.min(1, MAX_EDGE / Math.max(cssW * scale, cssH * scale));
-      const outW    = (Math.max(2, Math.round(cssW * scale * fit))) & ~1;  // even (encoders prefer)
-      const outH    = (Math.max(2, Math.round(cssH * scale * fit))) & ~1;
+      let outW, outH, ssaaOverride = null;
+      if (isVideo) {
+        const MAX_TEX = 8192;
+        let dpr = RENDER_PIXEL_RATIO * scale;          // exact on-screen ratio × scale
+        const longCss = Math.max(cssW, cssH);
+        if (longCss * dpr > MAX_TEX) dpr = MAX_TEX / longCss;   // GPU safety clamp
+        ssaaOverride = dpr;
+        outW = (Math.max(2, Math.round(cssW * dpr))) & ~1;     // even (encoders prefer)
+        outH = (Math.max(2, Math.round(cssH * dpr))) & ~1;
+      } else {
+        const MAX_EDGE = 1600;
+        const fit = Math.min(1, MAX_EDGE / Math.max(cssW * scale, cssH * scale));
+        outW = (Math.max(2, Math.round(cssW * scale * fit))) & ~1;
+        outH = (Math.max(2, Math.round(cssH * scale * fit))) & ~1;
+      }
       const fStart  = App.clipStartFrame | 0;
       const fEnd    = App.clipEndFrame   | 0;
 
@@ -7511,7 +7530,7 @@ function bindControls() {
           recorder.start();
           const frameMs = 1000 / fps;
           await runCaptureLoop({
-            panel, scale, fps, stride, fStart, fEnd, target,
+            panel, scale, fps, stride, fStart, fEnd, target, ssaa: ssaaOverride,
             onFrame: async (n) => {
               track.requestFrame();
               // Pace so MediaRecorder timestamps space out evenly.
@@ -7553,7 +7572,7 @@ function bindControls() {
           const target = document.createElement('canvas');
           target.width = outW; target.height = outH;
           await runCaptureLoop({
-            panel, scale, fps, stride, fStart, fEnd, target,
+            panel, scale, fps, stride, fStart, fEnd, target, ssaa: ssaaOverride,
             onFrame: async () => {
               gif.addFrame(target, { delay: delayMs, copy: true });
             },
