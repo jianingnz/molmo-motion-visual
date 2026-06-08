@@ -419,6 +419,9 @@ footer a { color: #2563eb; text-decoration: none; }
             <option value="static/data/insert_remove_utensils_534_t185.json">insert_remove_utensils_534 · obj0 · t185 · pick up plastic cutlery (raw vs filter+smooth demo)</option>
             <option value="static/data/clean_surface_3603_t12.json">clean_surface_3603 · obj0 · t12</option>
             <option value="static/data/egodex_basic_pick_place_13417.json">part2_basic_pick_place_13417 · put orange toy in blue bowl</option>
+            <option value="static/data/part5_stack_unstack_plates_6243_obj0_t8.json">stack_unstack_plates_6243 · obj0 · t8 · stack unstack plates</option>
+            <option value="static/data/part4_scoop_dump_ice_596_obj1_t11.json">scoop_dump_ice_596 · obj1 · t11 · scoop dump ice</option>
+            <option value="static/data/part2_assemble_disassemble_furniture_bench_stool_8419_obj0_t12.json">assemble_disassemble_furniture_bench_stool_8419 · obj0 · t12 · assemble disassemble furniture bench stool</option>
           </optgroup>
           <optgroup label="HD-EPIC">
             <option value="static/data/P05-20240427-145526-105.json">P05-20240427-145526-105 · pour soy sauce into pan</option>
@@ -447,6 +450,7 @@ footer a { color: #2563eb; text-decoration: none; }
             <option value="static/data/camel_camal_t2.json">camel_camal · t2</option>
             <option value="static/data/flamingo_flamingo_t2.json">flamingo_flamingo · t2</option>
             <option value="static/data/car-turn_silver_car_t2.json">car-turn_silver_car · t2</option>
+            <option value="static/data/bmx-trees_bike_rider_t2.json">bmx-trees_bike_rider · t2</option>
           </optgroup>
           <optgroup label="HOT3D">
             <option value="static/data/hot3d_clip1995_clip1996.json">clip-001995 → clip-001996 · cross-clip stitched scene (MoGe @ first frame)</option>
@@ -462,6 +466,8 @@ footer a { color: #2563eb; text-decoration: none; }
           </optgroup>
           <optgroup label="YouTube-VIS">
             <option value="static/data/ytvis_parrots.json">two parrots playing with a toy</option>
+            <option value="static/data/ytvis_b1fc9c64e1.json">a black cat walks to the right</option>
+            <option value="static/data/ytvis_1f2609ee13.json">a blue parrot stands on a person's hand and then flies away</option>
           </optgroup>
         </select>
         <select class="btn" id="obj-sel" style="font-size:.72rem; display:none;" title="Tracked object — only shown when the clip has multiple"></select>
@@ -4987,7 +4993,7 @@ function detectDatasetFromUrl(url) {
   if (/^hot3d_/i.test(stem))                                            return 'hot3d';
   if (/^(AUTOLab|GuptaLab|PennPAL|CLVR|REAL)_/.test(stem))              return 'droid';
   if (/^P\d{2}-\d{8}-\d{6}-\d+$/.test(stem))                            return 'hdepic';
-  if (/^(camel|flamingo|car-turn)_/.test(stem))                         return 'davis';
+  if (/^(camel|flamingo|car-turn|bmx-trees)_/.test(stem))               return 'davis';
   if (/^molmospaces_/i.test(stem))                                      return 'molmospaces';
   if (/^ytvis_/i.test(stem))                                            return 'ytvis';
   return 'egodex';                                                       // fallback

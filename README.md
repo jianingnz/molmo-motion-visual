@@ -119,8 +119,59 @@ range) · `--merge` (concatenate objects into one config) · `--max-frames N`
 The `file` argument is the `"file"` field from
 `<dataset>/annotations/<dataset>_clips.json`. After building, add one
 `<option>` under the matching `<optgroup>` in `index.html`
-(`molmospaces_*` / `ytvis_*` ids get per-dataset denoise presets via
-`detectDatasetFromUrl`).
+(`molmospaces_*` / `ytvis_*` / `davis` ids get per-dataset denoise presets via
+`detectDatasetFromUrl` — add a new DAVIS stem to that regex when introducing
+one, e.g. `bmx-trees`).
+
+GT-only YT-VIS examples are added exactly this way, e.g.:
+
+```bash
+python build/prepare_unified.py --dataset ytvis --file b1fc9c64e1 \
+  --clip-id ytvis_b1fc9c64e1 --objs all   # "a black cat walks to the right"
+python build/prepare_unified.py --dataset ytvis --file 1f2609ee13 \
+  --clip-id ytvis_1f2609ee13 --objs all   # single-object → no --merge needed
+```
+
+### Prediction-bearing DAVIS / EgoDex examples (pred ≠ gt)
+
+Unlike the unified GT-only release, these bundles carry a real model
+prediction layer. The prediction + GT come from the fulleval rollout dumps
+under `…/MotionPlanner/molmo2/eval_results/`:
+
+- **DAVIS** — `build/prepare_davis_singleclip.py` reads
+  `fulleval_rollout_3mix_p8_davis_<split>/predictions.jsonl`, picks the
+  min-l2 prediction for the video, and remaps to the `…_t2` (3-history)
+  convention used by the other DAVIS clips:
+
+  ```bash
+  python build/prepare_davis_singleclip.py --video bmx-trees --out-dir . \
+    --clip-id bmx-trees_bike_rider_t2
+  ```
+
+- **EgoDex** — feed the motion5-viz `modeling_json` (already pred-baked by
+  `build_motion4_site.build_clip_json`) to `build/prepare_clip.py`, which
+  bakes the stride-1 vipe scene PC. `--video-stem` is the vipe artifact stem
+  (no `_objN` suffix):
+
+  ```bash
+  M5=/weka/prior-default/jianingz/home/visual/motion5-viz
+  python build/prepare_clip.py \
+    --src-json "$M5/static/data/modeling_json/egodex/test/part5_stack_unstack_plates_6243_obj0_t8.json" \
+    --src-mp4  "$M5/static/videos/modeling/egodex/part5_stack_unstack_plates_6243.mp4" \
+    --out-dir . --clip-id part5_stack_unstack_plates_6243_obj0_t8 \
+    --video-stem part5_stack_unstack_plates_6243
+  ```
+
+  When no `modeling_json` exists for the desired `t0` (e.g.
+  `part4_scoop_dump_ice_596_obj1_t11`), first synthesize one from the egodex
+  `predictions.jsonl` with `tmp/gen_egodex_src.py --video … --obj … --t0 …
+  --out-json …` (a thin wrapper over `build_clip_json(dataset="egodex")`),
+  then run `prepare_clip.py` on that JSON.
+
+  These bundles ship the core clip (RGB/chrono/3D pred+gt + stride-1 PC) but
+  **not** the optional `full_video` panel or hi-res frame strips — run
+  `prepare_full_video.py` / `extract_hires_frames.py` afterward only if a
+  paper figure needs them (the viewer degrades gracefully without).
 
 ## Source clips used for the demo
 
